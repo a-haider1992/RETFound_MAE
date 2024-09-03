@@ -14,6 +14,7 @@ from pathlib import Path
 import torch
 import torch.backends.cudnn as cudnn
 from torch.utils.tensorboard import SummaryWriter
+from explainability import compute_and_save_heatmaps
 
 import timm
 
@@ -24,13 +25,15 @@ from timm.loss import LabelSmoothingCrossEntropy, SoftTargetCrossEntropy
 
 import util.lr_decay as lrd
 import util.misc as misc
-from util.datasets import build_dataset
+from util.datasets import build_dataset, custom_collate
 from util.pos_embed import interpolate_pos_embed
 from util.misc import NativeScalerWithGradNormCount as NativeScaler
 
 import models_vit
 
 from engine_finetune import train_one_epoch, evaluate
+
+import pdb
 
 
 def get_args_parser():
@@ -166,16 +169,89 @@ def main(args):
 
     cudnn.benchmark = True
 
-    dataset_train = build_dataset(is_train='train', args=args)
-    dataset_val = build_dataset(is_train='val', args=args)
-    dataset_test = build_dataset(is_train='test', args=args)
+    dataset_train, transform = build_dataset(is_train='train', args=args)
+    dataset_val, _ = build_dataset(is_train='val', args=args)
+    dataset_test, _ = build_dataset(is_train='test', args=args)
+
+    ## Custom sampler
+    class BalancedDistributedSampler(torch.utils.data.DistributedSampler):
+        def __init__(self, dataset, class_indices, batch_size, num_replicas=None, rank=None, shuffle=True):
+            super().__init__(dataset, num_replicas=num_replicas, rank=rank, shuffle=shuffle)
+            self.class_indices = list(class_indices.values())
+            self.num_classes = len(self.class_indices)
+            self.batch_size = batch_size
+            self.num_samples_per_class_per_batch = self.batch_size // self.num_classes
+            self.total_samples_per_class = min(len(indices) for indices in self.class_indices)
+            self.num_samples = self.num_samples_per_class_per_batch * self.num_classes
+            self.epoch = 0
+            self.shuffle = shuffle
+
+        def __iter__(self):
+            g = torch.Generator()
+            g.manual_seed(self.epoch + self.rank)
+
+            class_indices_shuffled = []
+            for class_indices in self.class_indices:
+                if self.shuffle:
+                    shuffled_indices = torch.randperm(len(class_indices), generator=g).tolist()
+                    class_indices = [class_indices[i] for i in shuffled_indices]
+                class_indices_shuffled.append(class_indices)
+
+            batch_indices = []
+            max_full_batches = self.total_samples_per_class // self.num_samples_per_class_per_batch
+
+            for batch_idx in range(max_full_batches):
+                batch = []
+                for class_idx in range(self.num_classes):
+                    start_idx = batch_idx * self.num_samples_per_class_per_batch
+                    end_idx = start_idx + self.num_samples_per_class_per_batch
+                    batch.extend(class_indices_shuffled[class_idx][start_idx:end_idx])
+                if self.shuffle:
+                    batch = [batch[i] for i in torch.randperm(len(batch), generator=g)]
+                batch_indices.append(batch)
+
+            # Shuffle the order of the batches if shuffling is enabled
+            if self.shuffle:
+                batch_indices = [batch_indices[i] for i in torch.randperm(len(batch_indices), generator=g)]
+
+            # Flatten the list of batches into a single list of indices
+            batch_indices_flat = [idx for batch in batch_indices for idx in batch]
+
+            # Ensure each replica gets a unique subset
+            total_size = len(batch_indices_flat)
+            num_samples_per_replica = (total_size + self.num_replicas - 1) // self.num_replicas
+            start_idx = self.rank * num_samples_per_replica
+            end_idx = min(start_idx + num_samples_per_replica, total_size)
+            indices = batch_indices_flat[start_idx:end_idx]
+
+            # print(f"Indices for rank {self.rank}: {indices}")
+            return iter(indices)
+
+        def __len__(self):
+            max_full_batches = self.total_samples_per_class // self.num_samples_per_class_per_batch
+            return max_full_batches * self.num_samples
+
+        def set_epoch(self, epoch):
+            self.epoch = epoch
+
+
+    # Sample usage assuming class_indices and dataset_train are defined
+    class_indices = {}
+    for idx, (path, _) in enumerate(dataset_train.samples):
+        class_name = os.path.basename(os.path.dirname(path))
+        if class_name not in class_indices:
+            class_indices[class_name] = []
+        class_indices[class_name].append(idx)
 
     if True:  # args.distributed:
         num_tasks = misc.get_world_size()
         global_rank = misc.get_rank()
-        sampler_train = torch.utils.data.DistributedSampler(
-            dataset_train, num_replicas=num_tasks, rank=global_rank, shuffle=True
-        )
+        # sampler_train = torch.utils.data.DistributedSampler(
+        #     dataset_train, num_replicas=num_tasks, rank=global_rank, shuffle=True
+        # )
+
+        sampler_train = BalancedDistributedSampler(dataset_train, class_indices, args.batch_size, num_replicas=num_tasks, rank=global_rank, shuffle=True)
+        
         print("Sampler_train = %s" % str(sampler_train))
         if args.dist_eval:
             if len(dataset_val) % num_tasks != 0:
@@ -210,6 +286,7 @@ def main(args):
         num_workers=args.num_workers,
         pin_memory=args.pin_mem,
         drop_last=True,
+        collate_fn=custom_collate
     )
 
     data_loader_val = torch.utils.data.DataLoader(
@@ -217,7 +294,8 @@ def main(args):
         batch_size=args.batch_size,
         num_workers=args.num_workers,
         pin_memory=args.pin_mem,
-        drop_last=False
+        drop_last=False,
+        collate_fn=custom_collate
     )
 
     data_loader_test = torch.utils.data.DataLoader(
@@ -225,7 +303,8 @@ def main(args):
         batch_size=args.batch_size,
         num_workers=args.num_workers,
         pin_memory=args.pin_mem,
-        drop_last=False
+        drop_last=False,
+        collate_fn=custom_collate
     )
     
     
@@ -305,10 +384,10 @@ def main(args):
     if mixup_fn is not None:
         # smoothing is handled with mixup label transform
         criterion = SoftTargetCrossEntropy()
-    elif args.smoothing > 0.:
-        criterion = LabelSmoothingCrossEntropy(smoothing=args.smoothing)
-    else:
-        criterion = torch.nn.CrossEntropyLoss()
+    # elif args.smoothing > 0.:
+    #     criterion = LabelSmoothingCrossEntropy(smoothing=args.smoothing)
+    # else:
+    criterion = torch.nn.CrossEntropyLoss()
 
     print("criterion = %s" % str(criterion))
 
@@ -322,6 +401,7 @@ def main(args):
     start_time = time.time()
     max_accuracy = 0.0
     max_auc = 0.0
+    # pdb.set_trace()
     for epoch in range(args.start_epoch, args.epochs):
         if args.distributed:
             data_loader_train.sampler.set_epoch(epoch)
@@ -356,6 +436,7 @@ def main(args):
                 log_writer.flush()
             with open(os.path.join(args.output_dir, "log.txt"), mode="a", encoding="utf-8") as f:
                 f.write(json.dumps(log_stats) + "\n")
+        # compute_and_save_heatmaps(model, data_loader_test, args.output_dir+"heatmaps", transform=transform)
 
                 
     total_time = time.time() - start_time

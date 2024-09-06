@@ -114,6 +114,7 @@ def get_args_parser():
     parser.set_defaults(global_pool=True)
     parser.add_argument('--cls_token', action='store_false', dest='global_pool',
                         help='Use class token instead of global pool for classification')
+    parser.add_argument('--explainability', action='store_true')
 
     # Dataset parameters
     parser.add_argument('--data_path', default='/home/jupyter/Mor_DR_data/data/data/IDRID/Disease_Grading/', type=str,
@@ -169,9 +170,9 @@ def main(args):
 
     cudnn.benchmark = True
 
-    dataset_train, transform = build_dataset(is_train='train', args=args)
+    dataset_train, _ = build_dataset(is_train='train', args=args)
     dataset_val, _ = build_dataset(is_train='val', args=args)
-    dataset_test, _ = build_dataset(is_train='test', args=args)
+    dataset_test, transform = build_dataset(is_train='test', args=args)
 
     ## Custom sampler
     class BalancedDistributedSampler(torch.utils.data.DistributedSampler):
@@ -402,6 +403,9 @@ def main(args):
     max_accuracy = 0.0
     max_auc = 0.0
     # pdb.set_trace()
+    if args.explainability:
+        compute_and_save_heatmaps(model, dataset_test, save_dir='heatmaps', transform=transform)
+    
     for epoch in range(args.start_epoch, args.epochs):
         if args.distributed:
             data_loader_train.sampler.set_epoch(epoch)
@@ -414,6 +418,7 @@ def main(args):
         )
 
         val_stats,val_auc_roc = evaluate(data_loader_val, model, device,args.task,epoch, mode='val',num_class=args.nb_classes)
+        # compute_and_save_heatmaps(model, save_dir=args.task+'val_heatmaps')
         if max_auc<val_auc_roc:
             max_auc = val_auc_roc
             
@@ -436,7 +441,6 @@ def main(args):
                 log_writer.flush()
             with open(os.path.join(args.output_dir, "log.txt"), mode="a", encoding="utf-8") as f:
                 f.write(json.dumps(log_stats) + "\n")
-        # compute_and_save_heatmaps(model, data_loader_test, args.output_dir+"heatmaps", transform=transform)
 
                 
     total_time = time.time() - start_time
@@ -445,6 +449,7 @@ def main(args):
     state_dict_best = torch.load(args.task+'checkpoint-best.pth', map_location='cpu')
     model_without_ddp.load_state_dict(state_dict_best['model'])
     test_stats,auc_roc = evaluate(data_loader_test, model_without_ddp, device,args.task,epoch=0, mode='test',num_class=args.nb_classes)
+    compute_and_save_heatmaps(model, save_dir=args.task+'test_heatmaps')
 
 if __name__ == '__main__':
     args = get_args_parser()

@@ -39,7 +39,7 @@ def compute_and_save_heatmaps(model, save_dir, transform=None):
     model.eval()
     target_layers = [model.module.blocks[-1].norm1]  # Adjust this line based on your model architecture
 
-    test_dataset = ImagePathDataset(root_dir='/data/fundus_ARMS_Retfound/test', transform=transform)
+    test_dataset = ImagePathDataset(root_dir='Retfound_correct_predictions', transform=transform)
     test_loader = torch.utils.data.DataLoader(test_dataset, batch_size=16, shuffle=False)
 
     # Initialize GradCAM
@@ -51,12 +51,12 @@ def compute_and_save_heatmaps(model, save_dir, transform=None):
     # Iterate over the test images and their corresponding labels
     for batch_idx, (image_paths, targets) in enumerate(test_loader):
         for idx, img_path in enumerate(image_paths):
-            # Load the image using cv2 (img_path is the path to the image)
+            # Load the image using cv2
             rgb_img = cv2.imread(img_path)[:, :, ::-1]  # Convert BGR (OpenCV) to RGB
             rgb_img = cv2.resize(rgb_img, (224, 224))
-            rgb_img = np.float32(rgb_img) / 255.0  # Normalize to range [0,1]
+            rgb_img = np.float32(rgb_img) / 255.0  # Normalize to [0,1]
 
-            # Preprocess image for the model
+            # Preprocess the image for the model
             input_tensor = preprocess_image(rgb_img, mean=[0.485, 0.456, 0.406],
                                             std=[0.229, 0.224, 0.225])
 
@@ -69,14 +69,21 @@ def compute_and_save_heatmaps(model, save_dir, transform=None):
                                 eigen_smooth=True,
                                 aug_smooth=True)
 
-            # Get the first grayscale CAM in the batch (there's only one image in this loop)
+            # Get the first grayscale CAM in the batch (only one image in this loop)
             grayscale_cam = grayscale_cam[0]
 
             # Overlay the Grad-CAM heatmap on the original image
-            cam_image = show_cam_on_image(rgb_img, grayscale_cam)
+            cam_image = show_cam_on_image(rgb_img, grayscale_cam, use_rgb=True)
 
-            # Save the resulting heatmap overlay image
-            save_path = os.path.join(save_dir, f'heatmap_{batch_idx}_{idx}.png')
+            # Extract subfolder name from the image path
+            subfolder = os.path.basename(os.path.dirname(img_path))
+            image_name = os.path.basename(img_path)
+            subfolder_dir = os.path.join(save_dir, subfolder)
+
+            # Ensure subfolder exists
+            os.makedirs(subfolder_dir, exist_ok=True)
+
+            # Save the resulting heatmap
+            save_path = os.path.join(subfolder_dir, f'heatmap_{batch_idx}_{idx}_{image_name}')
             cv2.imwrite(save_path, cv2.cvtColor(cam_image, cv2.COLOR_RGB2BGR))
-            print(f'Heatmap saved at {save_path}')
-
+            # print(f'Heatmap saved at {save_path}')

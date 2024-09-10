@@ -11,19 +11,48 @@ import torch
 import re
 
 # Custom collate function to extract information from the image filenames
+# def custom_collate(batch):
+#     images, labels, filenames = zip(*batch)
+    
+#     # Extract the desired information from the filenames using regex
+#     info = {"NicolaID": [], "Slice": []}
+#     for name in filenames:
+#         match = re.search(r'N1[^_]*', name)  # This regex matches "N" followed by any characters until "_"
+#         match1 = re.search(r'oct_\d+', name)  # This regex matches "Slice" followed by any digits
+#         if match:
+#             info["NicolaID"].append(match.group())  # Add the matched string to the info list
+
+#         if match1:
+#             info["Slice"].append(match1.group())
+    
+#     return torch.stack(images), torch.tensor(labels), info
+
+
 def custom_collate(batch):
     images, labels, filenames = zip(*batch)
     
-    # Extract the desired information from the filenames using regex
-    info = []
-    for name in filenames:
-        match = re.search(r'N1[^_]*', name)  # This regex matches "N" followed by any characters until "_"
-        if match:
-            info.append(match.group())  # Add the matched string to the info list
-        else:
-            info.append(None)  # In case no match is found (though ideally there should be one)
+    # Initialize info dictionary
+    info = {"NicolaID": [], "Slice": []}
     
-    return torch.stack(images), torch.tensor(labels), info
+    for name in filenames:
+        # print(f"Filename: {name})")
+        # Match NicolaID pattern (adjust the regex according to your filename format)
+        match = re.search(r'N1[^_]*', name)  # This regex matches "N" followed by any characters until "_"
+        
+        # Match Slice pattern (adjust the regex according to your filename format)
+        match1 = re.search(r'oct_(\d+)\.', name)  # This regex matches "oct_" followed by any chars until "."
+        
+        # If matches are found, append to the lists; otherwise, append None or a placeholder
+        info["NicolaID"].append(match.group() if match else "Unknown_NicolaID")
+        info["Slice"].append(match1.group(1) if match1 else "Unknown_Slice")
+    
+    # Stack images into a tensor and convert labels to tensor
+    images_tensor = torch.stack(images)
+    labels_tensor = torch.tensor(labels)
+
+    assert len(info["NicolaID"]) == len(info["Slice"]), "Mismatch between slice count and NicolaID count"
+    
+    return images_tensor, labels_tensor, info
 
 
 # Define a wrapper around the Dataset to also return the filename

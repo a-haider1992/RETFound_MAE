@@ -23,6 +23,7 @@ import seaborn as sns
 from sklearn.manifold import TSNE
 from sklearn.metrics import matthews_corrcoef, f1_score
 from collections import Counter
+import matplotlib.pyplot as plt
 
 import pdb
 
@@ -91,8 +92,9 @@ def train_one_epoch(model: torch.nn.Module, criterion: torch.nn.Module,
     # pdb.set_trace()
     # for samples, targets in metric_logger.log_every(data_loader, print_freq, header):
     #     print(targets)
-
-    for data_iter_step, (samples, targets, _) in enumerate(metric_logger.log_every(data_loader, print_freq, header)):
+    
+    feature_dict = {}
+    for data_iter_step, (samples, targets, info) in enumerate(metric_logger.log_every(data_loader, print_freq, header)):
 
         # we use a per iteration (instead of per epoch) lr scheduler
         if data_iter_step % accum_iter == 0:
@@ -100,7 +102,14 @@ def train_one_epoch(model: torch.nn.Module, criterion: torch.nn.Module,
 
         samples = samples.to(device, non_blocking=True)
         targets = targets.to(device, non_blocking=True)
-        # print(targets)
+
+        # pdb.set_trace()
+
+        Pid = info['NicolaID']
+        slices = info['Slice']
+
+        # for key, value in feature_dict.items():
+        #     print(f'Feature dict: {key} - {value}')
 
         if mixup_fn is not None:
             samples, targets = mixup_fn(samples, targets)
@@ -109,6 +118,23 @@ def train_one_epoch(model: torch.nn.Module, criterion: torch.nn.Module,
             outputs, fea_vec = model(samples)
             # print(f"Fearure vector shape: {fea_vec.shape}")
             loss = criterion(outputs, targets)
+            prediction_softmax = nn.Softmax(dim=1)(outputs)
+            _, prediction_decode = torch.max(prediction_softmax, 1)
+
+            # for i in range(len(slices)):
+            #     if slices[i] not in feature_dict:
+            #         feature_dict[slices[i]] = {}
+            #     if Pid[i] not in feature_dict[slices[i]]:
+            #         feature_dict[slices[i]][Pid[i]] = {"0":0, "1":0, "2":0, "True": targets[i].item()}  
+            #     if prediction_decode[i].item() == 0:
+            #         feature_dict[slices[i]][Pid[i]]["0"] += 1
+            #     elif prediction_decode[i].item() == 1:
+            #         feature_dict[slices[i]][Pid[i]]["1"] += 1
+            #     elif prediction_decode[i].item() == 2:
+            #         feature_dict[slices[i]][Pid[i]]["2"] += 1
+
+            # for key, value in feature_dict.items():
+            #     print(f'Feature dict: {key} - {value}')
 
         loss_value = loss.item()
 
@@ -143,6 +169,9 @@ def train_one_epoch(model: torch.nn.Module, criterion: torch.nn.Module,
             log_writer.add_scalar('loss', loss_value_reduce, epoch_1000x)
             log_writer.add_scalar('lr', max_lr, epoch_1000x)
 
+    # for key, value in feature_dict.items():
+    #     print(f'Feature dict: {key} - {value}')
+
     # gather the stats from all processes
     metric_logger.synchronize_between_processes()
     print("Averaged stats:", metric_logger)
@@ -172,10 +201,13 @@ def evaluate(data_loader, model, device, task, epoch, mode, num_class):
     for batch in metric_logger.log_every(data_loader, 10, header):
         images = batch[0]
         target = batch[-2]
-        Pid = batch[-1]
+        info = batch[-1]
         images = images.to(device, non_blocking=True)
         target = target.to(device, non_blocking=True)
         true_label=F.one_hot(target.to(torch.int64), num_classes=num_class)
+
+        Pid = info['NicolaID']
+        slices = info['Slice']
 
         # compute output
         with torch.cuda.amp.autocast():
@@ -191,11 +223,24 @@ def evaluate(data_loader, model, device, task, epoch, mode, num_class):
             true_label_onehot_list.extend(true_label.cpu().detach().numpy())
             prediction_list.extend(prediction_softmax.cpu().detach().numpy())
 
-            for i in range(len(Pid)):
-                if Pid[i] not in feature_dict:
-                    feature_dict[Pid[i]] = {"Pred": [], "True": []}
-                feature_dict[Pid[i]]["Pred"].append(prediction_decode[i].item())
-                feature_dict[Pid[i]]["True"].append(target[i].item())
+            for i in range(len(slices)):
+                if slices[i] not in feature_dict:
+                    feature_dict[slices[i]] = {}
+                if Pid[i] not in feature_dict[slices[i]]:
+                    feature_dict[slices[i]][Pid[i]] = {"0":0, "1":0, "2":0, "True": true_label_decode[i].item()}
+                if prediction_decode[i].item() == 0:
+                    feature_dict[slices[i]][Pid[i]]["0"] += 1
+                elif prediction_decode[i].item() == 1:
+                    feature_dict[slices[i]][Pid[i]]["1"] += 1
+                elif prediction_decode[i].item() == 2:
+                    feature_dict[slices[i]][Pid[i]]["2"] += 1
+
+            # for i in range(len(Pid)):
+            #     if Pid[i] not in feature_dict:
+            #         feature_dict[Pid[i]] = {"Pred": [], "True": [], "Slice": []}
+            #     feature_dict[Pid[i]]["Pred"].append(prediction_decode[i].item())
+            #     feature_dict[Pid[i]]["True"].append(target[i].item())
+            #     feature_dict[Pid[i]]["Slice"].append(slices[i])
 
         acc1,_ = accuracy(output, target, topk=(1,2))
 
@@ -221,40 +266,71 @@ def evaluate(data_loader, model, device, task, epoch, mode, num_class):
     #     for key, value in feature_dict.items():
     #         f.write("%s,%s\n"%(key,value))
     count = 0
-    for key, value in feature_dict.items():
+    keys_patient = {}
+    # Iterate through the feature_dict to find the max key and compare with "True" value
+    for slice_key, patient_dict in feature_dict.items():
+        if slice_key not in keys_patient:
+            keys_patient[slice_key] = []
+        for patient, pateints in patient_dict.items():
+            # Find the key of the maximum value in the current patient's dictionary (among "0", "1", "2")
+            valid_keys = {k: v for k, v in pateints.items() if k in ["0", "1", "2"]}
+            if valid_keys:
+                max_key = max(valid_keys, key=lambda k: valid_keys[k])
+
+                # Check if the max_key matches the value of the "True" key
+                if max_key == str(pateints.get("True", None)):  # Ensure matching as strings
+                    keys_patient[slice_key].append(max_key)
+
+    # Print the results
+    unique_counts = {}  # Store the unique count for each key
+    for key, value in keys_patient.items():
+        # Count unique patients (elements) per key
+        unique_count = len(set(value))
+        unique_counts[key] = unique_count  # Store the count
+        print(f'Key: {key}, Unique Patients: {unique_count}')
+    
+    if mode == 'val':
+        plt.plot(unique_counts.keys(), unique_counts.values(), marker='o')
+        plt.xlabel('Keys')
+        plt.ylabel('Unique Patients Count')
+        plt.title('Unique Patients Count per Key')
+        plt.xticks(rotation=45)  # Rotate x-axis labels if necessary
+        plt.tight_layout()
+        plt.savefig(task+'_slice_patient_count_val.jpg', dpi=600, bbox_inches='tight')
+            
         # Calculate the frequency of each element in 'Pred'
-        pred_counts = Counter(value['Pred'])
-        print(f'Pred counts: {pred_counts}')
-        # Get all elements sorted by their frequency in descending order
-        sorted_pred = [item for item, count in pred_counts.most_common()]
-        # Store the sorted list back in the dictionary
-        feature_dict[key]['Pred'] = sorted_pred
-        # print(f'Sorted Pred: {sorted_pred}')
+        # pred_counts = Counter(value['Pred'])
+        # # print(f'Pred counts: {pred_counts}')
+        # # Get all elements sorted by their frequency in descending order
+        # sorted_pred = [item for item, count in pred_counts.most_common()]
+        # # Store the sorted list back in the dictionary
+        # feature_dict[key]['Pred'] = sorted_pred
+        # # print(f'Sorted Pred: {sorted_pred}')
         
-        # Calculate the frequency of each element in 'True'
-        true_counts = Counter(value['True'])
-        # Get all elements sorted by their frequency in descending order
-        sorted_true = [item for item, count in true_counts.most_common()]
-        # Store the sorted list back in the dictionary
-        feature_dict[key]['True'] = sorted_true
+        # # Calculate the frequency of each element in 'True'
+        # true_counts = Counter(value['True'])
+        # # Get all elements sorted by their frequency in descending order
+        # sorted_true = [item for item, count in true_counts.most_common()]
+        # # Store the sorted list back in the dictionary
+        # feature_dict[key]['True'] = sorted_true
 
-        # Compare the top two from Pred with the topmost from True
-        top_pred = sorted_pred[:2]  # Get the top 2 predictions
-        top_true = sorted_true[0]   # Get the top 1 true label
+        # # Compare the top two from Pred with the topmost from True
+        # top_pred = sorted_pred[:2]  # Get the top 2 predictions
+        # top_true = sorted_true[0]   # Get the top 1 true label
 
-        print(f'Top Pred: {top_pred} Top True: {top_true}')
+        # # print(f'Top Pred: {top_pred} Top True: {top_true}')
 
-        # Check if the top true label is in the top two predictions
-        if top_true in top_pred:
-            count += 1
+        # # Check if the top true label is in the top two predictions
+        # if top_true in top_pred:
+        #     count += 1
 
     # for key, value in feature_dict.items():
     #     feature_dict[key]['Pred'] = max(set(value['Pred']), key=value['Pred'].count)
     #     feature_dict[key]['True'] = max(set(value['True']), key=value['True'].count)
     #     print(f'Feature dict: {key} - {feature_dict[key]}')
     #     count += feature_dict[key]['True'] == feature_dict[key]['Pred']
-    if mode == 'val':
-        print(f'Validation Accuracy per patient: {count/len(feature_dict) * 100}%')
+    # if mode == 'val':
+    #     print(f'Validation Accuracy per patient: {count/len(feature_dict) * 100}%')
     print('Sklearn Metrics - Acc: {:.4f} AUC-roc: {:.4f} AUC-pr: {:.4f} F1-score: {:.4f} MCC: {:.4f}'.format(acc, auc_roc, auc_pr, F1, mcc)) 
     results_path = task+'_metrics_{}.csv'.format(mode)
     if mode == 'val':
@@ -291,28 +367,14 @@ def evaluate(data_loader, model, device, task, epoch, mode, num_class):
         # cm.plot(cmap=plt.cm.Blues,number_label=True,normalized=True,plot_lib="matplotlib")
         plt.savefig(task+'confusion_matrix_test.jpg',dpi=600,bbox_inches ='tight')
 
-        # features = []
-        # labels = []
-
-        # for label, feature_list in feature_dict.items():
-        #     for feature in feature_list:
-        #         features.append(feature.cpu().detach().numpy())
-        #         labels.append(label)
-
-        # features = np.concatenate(features)  # Convert list of arrays to a single array
-
-        # # Apply t-SNE to reduce feature dimensions
-        # tsne = TSNE(n_components=2, random_state=42)
-        # reduced_features = tsne.fit_transform(features)
-
-        # # Plot the t-SNE result
-        # plt.figure(figsize=(10, 8))
-        # scatter = plt.scatter(reduced_features[:, 0], reduced_features[:, 1], c=labels, cmap='tab10', alpha=0.7)
-        # plt.colorbar(scatter, ticks=range(num_class))
-        # plt.title("t-SNE of Feature Vectors")
-        # plt.xlabel("t-SNE component 1")
-        # plt.ylabel("t-SNE component 2")
-        # plt.savefig(task+'t-SNE.jpg',dpi=600,bbox_inches ='tight')
+        # slice patient count graph
+        plt.plot(unique_counts.keys(), unique_counts.values(), marker='o')
+        plt.xlabel('Keys')
+        plt.ylabel('Unique Patients Count')
+        plt.title('Unique Patients Count per Key')
+        plt.xticks(rotation=45)  # Rotate x-axis labels if necessary
+        plt.tight_layout()
+        plt.savefig(task+'_slice_patient_count_test.jpg', dpi=600, bbox_inches='tight')
     
     return {k: meter.global_avg for k, meter in metric_logger.meters.items()},auc_roc
 

@@ -15,6 +15,7 @@ import torch
 import torch.backends.cudnn as cudnn
 from torch.utils.tensorboard import SummaryWriter
 from explainability import compute_and_save_heatmaps
+from evaluate import save_correct_predictions
 
 import timm
 
@@ -449,7 +450,9 @@ def main(args):
     state_dict_best = torch.load(args.task+'checkpoint-best.pth', map_location='cpu')
     model_without_ddp.load_state_dict(state_dict_best['model'])
     test_stats,auc_roc = evaluate(data_loader_test, model_without_ddp, device,args.task,epoch=0, mode='test',num_class=args.nb_classes)
-    compute_and_save_heatmaps(model, save_dir=args.task+'test_heatmaps')
+    # save_correct_predictions(model, save_folder='Retfound_correct_predictions', transform=transform)
+    # compute_and_save_heatmaps(model, save_dir=args.task+'test_heatmaps', transform=transform)
+    
 
 if __name__ == '__main__':
     args = get_args_parser()

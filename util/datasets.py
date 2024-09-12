@@ -32,7 +32,7 @@ def custom_collate(batch):
     images, labels, filenames = zip(*batch)
     
     # Initialize info dictionary
-    info = {"NicolaID": [], "Slice": []}
+    info = {"NicolaID": [], "Slice": [], "Timepoint": []}
     
     for name in filenames:
         # print(f"Filename: {name})")
@@ -41,16 +41,19 @@ def custom_collate(batch):
         
         # Match Slice pattern (adjust the regex according to your filename format)
         match1 = re.search(r'oct_(\d+)\.', name)  # This regex matches "oct_" followed by any chars until "."
+
+        match2 = re.search(r'(\d+)_oct', name)  # This regex matches "oct_" followed by any digits
         
         # If matches are found, append to the lists; otherwise, append None or a placeholder
         info["NicolaID"].append(match.group() if match else "Unknown_NicolaID")
         info["Slice"].append(match1.group(1) if match1 else "Unknown_Slice")
+        info["Timepoint"].append(match2.group(1) if match2 else "Unknown_Timepoint")
     
     # Stack images into a tensor and convert labels to tensor
     images_tensor = torch.stack(images)
     labels_tensor = torch.tensor(labels)
 
-    assert len(info["NicolaID"]) == len(info["Slice"]), "Mismatch between slice count and NicolaID count"
+    assert len(info["NicolaID"]) == len(info["Slice"]) == len(info["Timepoint"]), "Mismatch between slices, NicolaID, and Timepoints count"
     
     return images_tensor, labels_tensor, info
 

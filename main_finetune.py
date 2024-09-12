@@ -35,6 +35,24 @@ import models_vit
 from engine_finetune import train_one_epoch, evaluate
 
 import pdb
+import logging
+
+
+def setup_logging():
+    # Configure the logger
+    logging.basicConfig(
+        level=logging.INFO,  # Set the logging level (INFO, DEBUG, ERROR, etc.)
+        format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+        handlers=[
+            logging.FileHandler("app.log"),  # Log to a file
+            logging.StreamHandler()          # Log to console
+        ]
+    )
+    logger = logging.getLogger(__name__)  # Create a logger object
+    return logger
+
+# Set up logging in the main script
+logger = setup_logging()
 
 
 def get_args_parser():
@@ -170,11 +188,15 @@ def main(args):
     np.random.seed(seed)
 
     cudnn.benchmark = True
+    
+    logger.info("This is the main script.")
+    logger.info("Loading the dataset...")
 
     dataset_train, _ = build_dataset(is_train='train', args=args)
     dataset_val, _ = build_dataset(is_train='val', args=args)
     dataset_test, transform = build_dataset(is_train='test', args=args)
 
+    logger.info("Dataset loaded successfully.")
     ## Custom sampler
     class BalancedDistributedSampler(torch.utils.data.DistributedSampler):
         def __init__(self, dataset, class_indices, batch_size, num_replicas=None, rank=None, shuffle=True):
@@ -418,6 +440,7 @@ def main(args):
             args=args
         )
 
+        # _, _ = evaluate(data_loader_train, model, device,args.task,epoch, mode='train',num_class=args.nb_classes)
         val_stats,val_auc_roc = evaluate(data_loader_val, model, device,args.task,epoch, mode='val',num_class=args.nb_classes)
         # compute_and_save_heatmaps(model, save_dir=args.task+'val_heatmaps')
         if max_auc<val_auc_roc:

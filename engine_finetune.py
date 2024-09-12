@@ -23,10 +23,11 @@ import seaborn as sns
 from sklearn.manifold import TSNE
 from sklearn.metrics import matthews_corrcoef, f1_score
 from collections import Counter
-import matplotlib.pyplot as plt
 
 import pdb
+import logging
 
+logger = logging.getLogger(__name__)
 
 
 def misc_measures(confusion_matrix):
@@ -107,6 +108,7 @@ def train_one_epoch(model: torch.nn.Module, criterion: torch.nn.Module,
 
         Pid = info['NicolaID']
         slices = info['Slice']
+        timepoints = info['Timepoint']
 
         # for key, value in feature_dict.items():
         #     print(f'Feature dict: {key} - {value}')
@@ -121,17 +123,13 @@ def train_one_epoch(model: torch.nn.Module, criterion: torch.nn.Module,
             prediction_softmax = nn.Softmax(dim=1)(outputs)
             _, prediction_decode = torch.max(prediction_softmax, 1)
 
-            # for i in range(len(slices)):
-            #     if slices[i] not in feature_dict:
-            #         feature_dict[slices[i]] = {}
-            #     if Pid[i] not in feature_dict[slices[i]]:
-            #         feature_dict[slices[i]][Pid[i]] = {"0":0, "1":0, "2":0, "True": targets[i].item()}  
-            #     if prediction_decode[i].item() == 0:
-            #         feature_dict[slices[i]][Pid[i]]["0"] += 1
-            #     elif prediction_decode[i].item() == 1:
-            #         feature_dict[slices[i]][Pid[i]]["1"] += 1
-            #     elif prediction_decode[i].item() == 2:
-            #         feature_dict[slices[i]][Pid[i]]["2"] += 1
+            # for i in range(len(Pid)):
+            #     if Pid[i] not in feature_dict:
+            #         feature_dict[Pid[i]] = {}
+            #     if timepoints[i] not in feature_dict[Pid[i]]:
+            #         feature_dict[Pid[i]][timepoints[i]] = {}
+            #     if slices[i] not in feature_dict[Pid[i]][timepoints[i]]:
+            #         feature_dict[Pid[i]][timepoints[i]][slices[i]] = {"correct": 0}
 
             # for key, value in feature_dict.items():
             #     print(f'Feature dict: {key} - {value}')
@@ -169,9 +167,6 @@ def train_one_epoch(model: torch.nn.Module, criterion: torch.nn.Module,
             log_writer.add_scalar('loss', loss_value_reduce, epoch_1000x)
             log_writer.add_scalar('lr', max_lr, epoch_1000x)
 
-    # for key, value in feature_dict.items():
-    #     print(f'Feature dict: {key} - {value}')
-
     # gather the stats from all processes
     metric_logger.synchronize_between_processes()
     print("Averaged stats:", metric_logger)
@@ -198,6 +193,7 @@ def evaluate(data_loader, model, device, task, epoch, mode, num_class):
     # switch to evaluation mode
     model.eval()
     feature_dict = {}
+    slice_preds = {}
     for batch in metric_logger.log_every(data_loader, 10, header):
         images = batch[0]
         target = batch[-2]
@@ -208,6 +204,7 @@ def evaluate(data_loader, model, device, task, epoch, mode, num_class):
 
         Pid = info['NicolaID']
         slices = info['Slice']
+        timepoints = info['Timepoint']
 
         # compute output
         with torch.cuda.amp.autocast():
@@ -223,24 +220,38 @@ def evaluate(data_loader, model, device, task, epoch, mode, num_class):
             true_label_onehot_list.extend(true_label.cpu().detach().numpy())
             prediction_list.extend(prediction_softmax.cpu().detach().numpy())
 
-            for i in range(len(slices)):
-                if slices[i] not in feature_dict:
-                    feature_dict[slices[i]] = {}
-                if Pid[i] not in feature_dict[slices[i]]:
-                    feature_dict[slices[i]][Pid[i]] = {"0":0, "1":0, "2":0, "True": true_label_decode[i].item()}
-                if prediction_decode[i].item() == 0:
-                    feature_dict[slices[i]][Pid[i]]["0"] += 1
-                elif prediction_decode[i].item() == 1:
-                    feature_dict[slices[i]][Pid[i]]["1"] += 1
-                elif prediction_decode[i].item() == 2:
-                    feature_dict[slices[i]][Pid[i]]["2"] += 1
+            # for i in range(len(slices)):
+                # if key not in slice_preds:
+                #     slice_preds[key] = {"correct": 0}
+                # if prediction_decode[i].item() == true_label_decode[i].item():
+                #     slice_preds[key]["correct"] += 1
+                # if slices[i] not in slice_preds:
+                #     slice_preds[slices[i]] = {"correct": 0, "occurence": 0}
+                # if prediction_decode[i].item() == true_label_decode[i].item():
+                #     slice_preds[slices[i]]["correct"] += 1
+                # slice_preds[slices[i]]["occurence"] += 1
+                # if slices[i] not in feature_dict:
+                #     feature_dict[slices[i]] = {}
+                # if Pid[i] not in feature_dict[slices[i]]:
+                #     feature_dict[slices[i]][Pid[i]] = {"0":0, "1":0, "2":0, "True": true_label_decode[i].item()}
+                # if prediction_decode[i].item() == 0:
+                #     feature_dict[slices[i]][Pid[i]]["0"] += 1
+                # elif prediction_decode[i].item() == 1:
+                #     feature_dict[slices[i]][Pid[i]]["1"] += 1
+                # elif prediction_decode[i].item() == 2:
+                #     feature_dict[slices[i]][Pid[i]]["2"] += 1
 
-            # for i in range(len(Pid)):
-            #     if Pid[i] not in feature_dict:
-            #         feature_dict[Pid[i]] = {"Pred": [], "True": [], "Slice": []}
-            #     feature_dict[Pid[i]]["Pred"].append(prediction_decode[i].item())
-            #     feature_dict[Pid[i]]["True"].append(target[i].item())
-            #     feature_dict[Pid[i]]["Slice"].append(slices[i])
+            # logging.info(f'Slice Predictions: {slice_preds}')
+
+            for i in range(len(Pid)):
+                if Pid[i] not in feature_dict:
+                    feature_dict[Pid[i]] = {}
+                if timepoints[i] not in feature_dict[Pid[i]]:
+                    feature_dict[Pid[i]][timepoints[i]] = {}
+                if slices[i] not in feature_dict[Pid[i]][timepoints[i]]:
+                    feature_dict[Pid[i]][timepoints[i]][slices[i]] = {"correct": 0}
+                if prediction_decode[i].item() == true_label_decode[i].item():
+                    feature_dict[Pid[i]][timepoints[i]][slices[i]]["correct"] += 1
 
         acc1,_ = accuracy(output, target, topk=(1,2))
 
@@ -265,38 +276,66 @@ def evaluate(data_loader, model, device, task, epoch, mode, num_class):
     # with open(task+'_feature_dict.csv', 'w') as f:
     #     for key, value in feature_dict.items():
     #         f.write("%s,%s\n"%(key,value))
-    count = 0
-    keys_patient = {}
+    # count = 0
+    # logging.info(f'Feature Dictionary created for {mode}')
+    # keys_patient = {}
     # Iterate through the feature_dict to find the max key and compare with "True" value
-    for slice_key, patient_dict in feature_dict.items():
-        if slice_key not in keys_patient:
-            keys_patient[slice_key] = []
-        for patient, pateints in patient_dict.items():
-            # Find the key of the maximum value in the current patient's dictionary (among "0", "1", "2")
-            valid_keys = {k: v for k, v in pateints.items() if k in ["0", "1", "2"]}
-            if valid_keys:
-                max_key = max(valid_keys, key=lambda k: valid_keys[k])
+    # for slice_key, patient_dict in feature_dict.items():
+    #     if slice_key not in keys_patient:
+    #         keys_patient[slice_key] = []
 
-                # Check if the max_key matches the value of the "True" key
-                if max_key == str(pateints.get("True", None)):  # Ensure matching as strings
-                    keys_patient[slice_key].append(max_key)
+    #     for patient, patients in patient_dict.items():
+    #         # Find the key of the maximum value in the current patient's dictionary (among "0", "1", "2")
+    #         valid_keys = {k: v for k, v in patients.items() if k in ["0", "1", "2"]}
+            
+    #         if valid_keys:
+    #             max_key = max(valid_keys, key=lambda k: valid_keys[k])
+
+    #             # Check if the max_key matches the value of the "True" key
+    #             true_value = str(patients.get("True", None))  # Ensure "True" key's value is a string
+    #             if max_key == true_value:  # Match max_key with the value of "True"
+    #                 keys_patient[slice_key].append(max_key)
+    #             else:
+    #                 print(f'Incorrect prediction for patient {patient} in slice {slice_key}')
+    #         else:
+    #             print(f'No valid keys found for patient {patient} in slice {slice_key}')
 
     # Print the results
-    unique_counts = {}  # Store the unique count for each key
-    for key, value in keys_patient.items():
-        # Count unique patients (elements) per key
-        unique_count = len(set(value))
-        unique_counts[key] = unique_count  # Store the count
-        print(f'Key: {key}, Unique Patients: {unique_count}')
+    # unique_counts = {}  # Store the unique count for each key
+    # logging.info(f'Keys patient dictionary created for {mode}')
+    logging.info(f'-------------------------------------------')
+    logging.info(f'Feature Dictionary created for {mode}')
+    # logging.info(f'Feature dict: {feature_dict}')
+    for key, value in feature_dict.items():
+        for timepoint, slices in value.items():
+            for slice_key, patients_count in slices.items():
+                val = patients_count["correct"]
+                norm_slice_key = slice_key / len(slices)
+                if norm_slice_key not in slice_preds:
+                    slice_preds[norm_slice_key] = {"correct": 0}
+                slice_preds[norm_slice_key]["correct"] += val
+                logging.info(f'Key: {key}, Timepoint: {timepoint}, Slice: {slice_key}, Patients: {patients_count}')
+                # logging.info(f'Slice Predictions: {slice_preds}')
+    # logging.info(keys_patient)
+    # for key, value in keys_patient.items():
+    #     # Count unique patients (elements) per key
+    #     print(f'Key: {key}, Patients: {value}, Mode: {mode}')
+    #     unique_count = len(set(value))
+    #     unique_counts[key] = unique_count  # Store the count
+    #     # print(f'Key: {key}, Unique Patients: {unique_count}, Mode: {mode}')
+
+    # logging.info(f'---------------------------------')
+    # logging.info(f'Unique Counts: {unique_counts}')
     
     if mode == 'val':
-        plt.plot(unique_counts.keys(), unique_counts.values(), marker='o')
-        plt.xlabel('Keys')
-        plt.ylabel('Unique Patients Count')
-        plt.title('Unique Patients Count per Key')
-        plt.xticks(rotation=45)  # Rotate x-axis labels if necessary
+        import matplotlib.pyplot as plt
+        plt.plot(list(slice_preds.keys()), [v["correct"] for v in slice_preds.values()], marker='o')
+        plt.xlabel('Slice')
+        plt.ylabel('Correct Predictions')
+        plt.title('Correct predictions frequency (Validation set)')
+        plt.xticks(rotation=90)
         plt.tight_layout()
-        plt.savefig(task+'_slice_patient_count_val.jpg', dpi=600, bbox_inches='tight')
+        plt.savefig(task+'_slice_count_val.jpg', dpi=600, bbox_inches='tight')
             
         # Calculate the frequency of each element in 'Pred'
         # pred_counts = Counter(value['Pred'])
@@ -333,15 +372,15 @@ def evaluate(data_loader, model, device, task, epoch, mode, num_class):
     #     print(f'Validation Accuracy per patient: {count/len(feature_dict) * 100}%')
     print('Sklearn Metrics - Acc: {:.4f} AUC-roc: {:.4f} AUC-pr: {:.4f} F1-score: {:.4f} MCC: {:.4f}'.format(acc, auc_roc, auc_pr, F1, mcc)) 
     results_path = task+'_metrics_{}.csv'.format(mode)
-    if mode == 'val':
-        cm = confusion_matrix(true_label_decode_list, prediction_decode_list)
-        plt.figure(figsize=(8, 6))
-        sns.heatmap(cm, annot=True, fmt='d', cmap='Blues', xticklabels=[0, 1, 2], yticklabels=[0, 1, 2])
-        plt.xlabel('Predicted Label')
-        plt.ylabel('True Label')
-        plt.title('Confusion Matrix Validation')
-        # cm.plot(cmap=plt.cm.Blues,number_label=True,normalized=True,plot_lib="matplotlib")
-        plt.savefig(task+'confusion_matrix_val.jpg',dpi=600,bbox_inches ='tight')
+    # if mode == 'val':
+    #     cm = confusion_matrix(true_label_decode_list, prediction_decode_list)
+    #     plt.figure(figsize=(8, 6))
+    #     sns.heatmap(cm, annot=True, fmt='d', cmap='Blues', xticklabels=[0, 1, 2], yticklabels=[0, 1, 2])
+    #     plt.xlabel('Predicted Label')
+    #     plt.ylabel('True Label')
+    #     plt.title('Confusion Matrix Validation')
+    #     # cm.plot(cmap=plt.cm.Blues,number_label=True,normalized=True,plot_lib="matplotlib")
+    #     plt.savefig(task+'confusion_matrix_val.jpg',dpi=600,bbox_inches ='tight')
     # Check file exists and is empty
     file_exists = os.path.isfile(results_path)
     file_empty = os.stat(results_path).st_size == 0 if file_exists else True
@@ -357,24 +396,25 @@ def evaluate(data_loader, model, device, task, epoch, mode, num_class):
             
     
     if mode=='test':
-        print(f'Test Accuracy per patient: {count/len(feature_dict) * 100}%')
-        cm = confusion_matrix(true_label_decode_list, prediction_decode_list)
-        plt.figure(figsize=(8, 6))
-        sns.heatmap(cm, annot=True, fmt='d', cmap='Blues', xticklabels=[0, 1, 2], yticklabels=[0, 1, 2])
-        plt.xlabel('Predicted Label')
-        plt.ylabel('True Label')
-        plt.title('Confusion Matrix Validation')
-        # cm.plot(cmap=plt.cm.Blues,number_label=True,normalized=True,plot_lib="matplotlib")
-        plt.savefig(task+'confusion_matrix_test.jpg',dpi=600,bbox_inches ='tight')
+        # print(f'Test Accuracy per patient: {count/len(feature_dict) * 100}%')
+        # cm = confusion_matrix(true_label_decode_list, prediction_decode_list)
+        # plt.figure(figsize=(8, 6))
+        # sns.heatmap(cm, annot=True, fmt='d', cmap='Blues', xticklabels=[0, 1, 2], yticklabels=[0, 1, 2])
+        # plt.xlabel('Predicted Label')
+        # plt.ylabel('True Label')
+        # plt.title('Confusion Matrix Validation')
+        # # cm.plot(cmap=plt.cm.Blues,number_label=True,normalized=True,plot_lib="matplotlib")
+        # plt.savefig(task+'confusion_matrix_test.jpg',dpi=600,bbox_inches ='tight')
 
         # slice patient count graph
-        plt.plot(unique_counts.keys(), unique_counts.values(), marker='o')
-        plt.xlabel('Keys')
-        plt.ylabel('Unique Patients Count')
-        plt.title('Unique Patients Count per Key')
-        plt.xticks(rotation=45)  # Rotate x-axis labels if necessary
-        plt.tight_layout()
-        plt.savefig(task+'_slice_patient_count_test.jpg', dpi=600, bbox_inches='tight')
+        import matplotlib.pyplot as plt_test
+        plt_test.plot(list(slice_preds.keys()), [v["correct"] for v in slice_preds.values()], marker='o')
+        plt_test.xlabel('Slice')
+        plt_test.ylabel('Correct Predictions')
+        plt_test.title('Correct predictions frequency (Test set)')
+        plt_test.xticks(rotation=90)
+        plt_test.tight_layout()
+        plt_test.savefig(task+'_slice_count_test.jpg', dpi=600, bbox_inches='tight')
     
     return {k: meter.global_avg for k, meter in metric_logger.meters.items()},auc_roc
 

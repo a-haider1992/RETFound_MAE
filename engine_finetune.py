@@ -194,6 +194,8 @@ def evaluate(data_loader, model, device, task, epoch, mode, num_class):
     model.eval()
     feature_dict = {}
     slice_preds = {}
+    class_dict = {}
+    total_slices = 0
     for batch in metric_logger.log_every(data_loader, 10, header):
         images = batch[0]
         target = batch[-2]
@@ -244,14 +246,29 @@ def evaluate(data_loader, model, device, task, epoch, mode, num_class):
             # logging.info(f'Slice Predictions: {slice_preds}')
 
             for i in range(len(Pid)):
-                if Pid[i] not in feature_dict:
-                    feature_dict[Pid[i]] = {}
-                if timepoints[i] not in feature_dict[Pid[i]]:
-                    feature_dict[Pid[i]][timepoints[i]] = {}
-                if slices[i] not in feature_dict[Pid[i]][timepoints[i]]:
-                    feature_dict[Pid[i]][timepoints[i]][slices[i]] = {"correct": 0}
-                if prediction_decode[i].item() == true_label_decode[i].item():
-                    feature_dict[Pid[i]][timepoints[i]][slices[i]]["correct"] += 1
+                total_slices += 1
+
+                true_label = true_label_decode[i].item()
+                pid = Pid[i]
+                timepoint = timepoints[i]
+                slice_ = slices[i]
+
+                # Ensure nested dictionary structure exists
+                if true_label not in feature_dict:
+                    feature_dict[true_label] = {}
+
+                # if pid not in feature_dict[true_label]:
+                #     feature_dict[true_label][pid] = {}
+
+                # if timepoint not in feature_dict[true_label][pid]:
+                #     feature_dict[true_label][pid][timepoint] = {}
+
+                if slice_ not in feature_dict[true_label]:
+                    feature_dict[true_label][slice_] = {"correct": 0}
+
+                # Increment 'correct' if prediction is accurate
+                if prediction_decode[i].item() == true_label:
+                    feature_dict[true_label][slice_]["correct"] += 1
 
         acc1,_ = accuracy(output, target, topk=(1,2))
 
@@ -305,17 +322,57 @@ def evaluate(data_loader, model, device, task, epoch, mode, num_class):
     # logging.info(f'Keys patient dictionary created for {mode}')
     logging.info(f'-------------------------------------------')
     logging.info(f'Feature Dictionary created for {mode}')
+    logging.info(f'Feature dict: {feature_dict}')
+    logging.info(f'-------------------------------------------')
+    max_count_ = {}
+
+    # Iterate through the feature_dict to find the top 5 slices with the highest "correct" values for each class
+    for cls_key, slices in feature_dict.items():  # Iterate over classes and their corresponding slices
+        # Sort slices by the "correct" count in descending order
+        sorted_slices = sorted(slices.items(), key=lambda x: x[1]["correct"], reverse=True)
+        
+        # Get the top 5 slices (or fewer if there are less than 5 slices)
+        top_slices = sorted_slices[:5]
+        
+        # Store the top slices and their corresponding "correct" values for this class
+        max_count_[cls_key] = [{"slice": slice_key, "correct": slice_info["correct"]} for slice_key, slice_info in top_slices]
+
+    # Print or use the max_count_ dictionary to see the result
+    for cls, top_slices_info in max_count_.items():
+        print(f"Class: {cls}, Top Slices Info: {top_slices_info}")
+
+
     # logging.info(f'Feature dict: {feature_dict}')
-    for key, value in feature_dict.items():
-        for timepoint, slices in value.items():
-            for slice_key, patients_count in slices.items():
-                val = patients_count["correct"]
-                norm_slice_key = slice_key / len(slices)
-                if norm_slice_key not in slice_preds:
-                    slice_preds[norm_slice_key] = {"correct": 0}
-                slice_preds[norm_slice_key]["correct"] += val
-                logging.info(f'Key: {key}, Timepoint: {timepoint}, Slice: {slice_key}, Patients: {patients_count}')
+    # max_count_ = {"max":0, "patient":"", "timepoint": "","slice": "", "probability": 0.0}
+    # max_count_ = {}
+    # for cls_key, cls_value in feature_dict.items():
+    #     for key, value in cls_value.items():
+    #         for timepoint, slices in value.items():
+    #             max_count_[cls_key] = []
+    #             max_pred = max(slices.values(), key=lambda x: x["correct"])
+    #             for slice_key, patients_count in slices.items():
+    #                 val = patients_count["correct"]
+    #                 if val == max_pred:
+    #                     max_count_[cls_key].append({"patient": key, "timepoint": timepoint, "slice": slice_key, "correct": val})
+                        # norm_slice_key = int(slice_key) / len(slices.keys())
+                        # # print(f'Normalised Slice: {norm_slice_key}')
+                        # norm_slice_key = str(norm_slice_key)
+                        # if norm_slice_key not in slice_preds:
+                        #     slice_preds[norm_slice_key] = {"correct": 0, "probability": 0.0}
+                        # slice_preds[norm_slice_key]["correct"] += val
+                        # slice_preds[norm_slice_key]["probability"] = slice_preds[norm_slice_key]["correct"] / total_slices
+                        # if slice_preds[norm_slice_key]["correct"] > max_count_["max"]:
+                        #     max_count_["max"] = slice_preds[norm_slice_key]["correct"]
+                        #     max_count_["patient"] = key
+                        #     max_count_["timepoint"] = timepoint
+                        #     max_count_['slice'] = slice_key
+                        #     max_count_["probability"] = slice_preds[norm_slice_key]["correct"] / total_slices
+                        # logging.info(f'Key: {key}, Timepoint: {timepoint}, Slice: {slice_key}, Patients: {patients_count}')
                 # logging.info(f'Slice Predictions: {slice_preds}')
+    
+    # logging.info(f'Slice Predictions: {slice_preds}')
+    # logging.info(f'Max count dict per class : {max_count_}')
+    logging.info(f'-------------------------------------------')
     # logging.info(keys_patient)
     # for key, value in keys_patient.items():
     #     # Count unique patients (elements) per key
@@ -329,13 +386,68 @@ def evaluate(data_loader, model, device, task, epoch, mode, num_class):
     
     if mode == 'val':
         import matplotlib.pyplot as plt
-        plt.plot(list(slice_preds.keys()), [v["correct"] for v in slice_preds.values()], marker='o')
-        plt.xlabel('Slice')
-        plt.ylabel('Correct Predictions')
-        plt.title('Correct predictions frequency (Validation set)')
-        plt.xticks(rotation=90)
+
+        # Sample data from max_count_
+        classes = list(max_count_.keys())
+        max_correct_values = []
+        slice_keys = []
+        class_labels = []
+
+        for cls in classes:
+            top_slices = max_count_[cls]  # Get the top slices for this class
+            for slice_info in top_slices:
+                max_correct_values.append(slice_info['correct'])
+                slice_keys.append(slice_info['slice'])
+                class_labels.append(cls)  # Add the class label for each slice
+
+        # Create the figure and plot the bar chart
+        plt.figure(figsize=(12, 8))
+
+        # Create a colormap to assign different colors to each class
+        colors = plt.cm.get_cmap('tab20', len(max_correct_values))
+
+        # Plot the bars with different colors
+        bars = plt.bar(range(len(max_correct_values)), max_correct_values, color=[colors(i) for i in range(len(max_correct_values))])
+
+        # Add slice key and class information inside each bar
+        for bar, slice_key, cls, correct in zip(bars, slice_keys, class_labels, max_correct_values):
+            plt.text(bar.get_x() + bar.get_width() / 2, bar.get_height() / 2,
+                    f'Slice: {slice_key}\nCorrect: {correct}', ha='center', va='center', color='black', fontsize=8, rotation=90)
+
+        # Normalize the Y-axis scale to handle large differences between values
+        plt.yscale('log')  # Log scale for better visualization of bars with low/high values
+        plt.ylim(1, max(max_correct_values) * 1.5)  # Adjust Y-limit to give some padding on top
+
+        # Set x-ticks to the class labels for better visualization
+        plt.xticks(range(len(max_correct_values)), class_labels, rotation=90)
+
+        # Add labels and title
+        plt.xlabel('Class and Slices')
+        plt.ylabel('Correct Predictions (log scale)')
+        plt.title('Top 5 Correct Predictions per Class with Corresponding Slices')
+
+        # Display the plot
         plt.tight_layout()
-        plt.savefig(task+'_slice_count_val.jpg', dpi=600, bbox_inches='tight')
+        plt.savefig(task+'_top5_val_max_correct_predictions_per_class.jpg', dpi=150, bbox_inches='tight')
+
+        # import matplotlib.pyplot as plt
+        # keys = list(slice_preds.keys())
+        # correct_values = [v["correct"] for v in slice_preds.values()]
+
+        # # Create the plot
+        # plt.figure(figsize=(10, 6))
+        # print(f'Plotted Graph for {mode}')
+        # plt.plot(keys, correct_values, marker='o', color='b', linestyle='-', markersize=5)
+        
+        # # Adding labels and title
+        # plt.xlabel('Slice')
+        # plt.ylabel('Correct Predictions')
+        # plt.title('Correct predictions frequency (Validation set)')
+        
+        # # Show only the first and last x-ticks (min and max)
+        # plt.xticks([0, len(keys)-1], [keys[0], keys[-1]])
+        # plt.tight_layout()
+        # plt.savefig(task+'_slice_count_val.jpg', dpi=600, bbox_inches='tight')
             
         # Calculate the frequency of each element in 'Pred'
         # pred_counts = Counter(value['Pred'])
@@ -396,8 +508,54 @@ def evaluate(data_loader, model, device, task, epoch, mode, num_class):
             
     
     if mode=='test':
+        import matplotlib.pyplot as plt
+
+        # Sample data from max_count_
+        classes = list(max_count_.keys())
+        max_correct_values = []
+        slice_keys = []
+        class_labels = []
+
+        for cls in classes:
+            top_slices = max_count_[cls]  # Get the top slices for this class
+            for slice_info in top_slices:
+                max_correct_values.append(slice_info['correct'])
+                slice_keys.append(slice_info['slice'])
+                class_labels.append(cls)  # Add the class label for each slice
+
+        # Create the figure and plot the bar chart
+        plt.figure(figsize=(12, 8))
+
+        # Create a colormap to assign different colors to each class
+        colors = plt.cm.get_cmap('tab20', len(max_correct_values))
+
+        # Plot the bars with different colors
+        bars = plt.bar(range(len(max_correct_values)), max_correct_values, color=[colors(i) for i in range(len(max_correct_values))])
+
+        # Add slice key and class information inside each bar
+        for bar, slice_key, cls, correct in zip(bars, slice_keys, class_labels, max_correct_values):
+            plt.text(bar.get_x() + bar.get_width() / 2, bar.get_height() / 2,
+                    f'Slice: {slice_key}\nCorrect: {correct}', ha='center', va='center', color='black', fontsize=8, rotation=90)
+
+        # Normalize the Y-axis scale to handle large differences between values
+        plt.yscale('log')  # Log scale for better visualization of bars with low/high values
+        plt.ylim(1, max(max_correct_values) * 1.5)  # Adjust Y-limit to give some padding on top
+
+        # Set x-ticks to the class labels for better visualization
+        plt.xticks(range(len(max_correct_values)), class_labels, rotation=90)
+
+        # Add labels and title
+        plt.xlabel('Class and Slices')
+        plt.ylabel('Correct Predictions (log scale)')
+        plt.title('Top 5 Correct Predictions per Class with Corresponding Slices')
+
+        # Display the plot
+        plt.tight_layout()
+        plt.savefig(task+'_top5_test_max_correct_predictions_per_class.jpg', dpi=150, bbox_inches='tight')
+
         # print(f'Test Accuracy per patient: {count/len(feature_dict) * 100}%')
         # cm = confusion_matrix(true_label_decode_list, prediction_decode_list)
+        # import matplotlib.pyplot as plt
         # plt.figure(figsize=(8, 6))
         # sns.heatmap(cm, annot=True, fmt='d', cmap='Blues', xticklabels=[0, 1, 2], yticklabels=[0, 1, 2])
         # plt.xlabel('Predicted Label')
@@ -407,14 +565,22 @@ def evaluate(data_loader, model, device, task, epoch, mode, num_class):
         # plt.savefig(task+'confusion_matrix_test.jpg',dpi=600,bbox_inches ='tight')
 
         # slice patient count graph
-        import matplotlib.pyplot as plt_test
-        plt_test.plot(list(slice_preds.keys()), [v["correct"] for v in slice_preds.values()], marker='o')
-        plt_test.xlabel('Slice')
-        plt_test.ylabel('Correct Predictions')
-        plt_test.title('Correct predictions frequency (Test set)')
-        plt_test.xticks(rotation=90)
-        plt_test.tight_layout()
-        plt_test.savefig(task+'_slice_count_test.jpg', dpi=600, bbox_inches='tight')
+        # import matplotlib.pyplot as plt
+        # keys = list(slice_preds.keys())
+        # correct_values = [v["correct"] for v in slice_preds.values()]
+        # # Plotting the values
+        # plt.plot(keys, correct_values, marker='o')
+        # # Adding labels and title
+        # plt.xlabel('Slice')
+        # plt.ylabel('Correct Predictions')
+        # plt.title('Correct predictions frequency (Validation set)')
+        # # Show only a few equidistant x-ticks: minimum, maximum, and some in between
+        # num_ticks = 10  # Number of x-ticks you want to display
+        # tick_positions = np.linspace(0, len(keys) - 1, num_ticks, dtype=int)  # Generate equidistant indices
+        # plt.xticks(tick_positions, [keys[i] for i in tick_positions], rotation=25)
+        # # Show grid and plot
+        # plt.grid(True)
+        # plt.savefig(task+'_slice_count_test.jpg', dpi=600, bbox_inches='tight')
     
     return {k: meter.global_avg for k, meter in metric_logger.meters.items()},auc_roc
 

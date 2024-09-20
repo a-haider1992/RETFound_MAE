@@ -148,7 +148,7 @@ def get_args_parser():
     parser.add_argument('--device', default='cuda',
                         help='device to use for training / testing')
     parser.add_argument('--seed', default=0, type=int)
-    parser.add_argument('--resume', default='',
+    parser.add_argument('--resume', default='', type=str,
                         help='resume from checkpoint')
 
     parser.add_argument('--start_epoch', default=0, type=int, metavar='N',
@@ -417,10 +417,6 @@ def main(args):
 
     misc.load_model(args=args, model_without_ddp=model_without_ddp, optimizer=optimizer, loss_scaler=loss_scaler)
 
-    if args.eval:
-        test_stats,auc_roc = evaluate(data_loader_test, model, device, args.task, epoch=0, mode='test',num_class=args.nb_classes)
-        exit(0)
-
     print(f"Start training for {args.epochs} epochs")
     start_time = time.time()
     max_accuracy = 0.0
@@ -428,49 +424,50 @@ def main(args):
     # pdb.set_trace()
     if args.explainability:
         compute_and_save_heatmaps(model, dataset_test, save_dir='heatmaps', transform=transform)
-    
-    for epoch in range(args.start_epoch, args.epochs):
-        if args.distributed:
-            data_loader_train.sampler.set_epoch(epoch)
-        train_stats = train_one_epoch(
-            model, criterion, data_loader_train,
-            optimizer, device, epoch, loss_scaler,
-            args.clip_grad, mixup_fn,
-            log_writer=log_writer,
-            args=args
-        )
 
-        # _, _ = evaluate(data_loader_train, model, device,args.task,epoch, mode='train',num_class=args.nb_classes)
-        val_stats,val_auc_roc = evaluate(data_loader_val, model, device,args.task,epoch, mode='val',num_class=args.nb_classes)
-        # compute_and_save_heatmaps(model, save_dir=args.task+'val_heatmaps')
-        if max_auc<val_auc_roc:
-            max_auc = val_auc_roc
-            
-            if args.output_dir:
-                misc.save_model(
-                    args=args, model=model, model_without_ddp=model_without_ddp, optimizer=optimizer,
-                    loss_scaler=loss_scaler, epoch=epoch)
-        
-        if log_writer is not None:
-            log_writer.add_scalar('perf/val_acc1', val_stats['acc1'], epoch)
-            log_writer.add_scalar('perf/val_auc', val_auc_roc, epoch)
-            log_writer.add_scalar('perf/val_loss', val_stats['loss'], epoch)
-            
-        log_stats = {**{f'train_{k}': v for k, v in train_stats.items()},
-                        'epoch': epoch,
-                        'n_parameters': n_parameters}
+    if not args.eval:
+        for epoch in range(args.start_epoch, args.epochs):
+            if args.distributed:
+                data_loader_train.sampler.set_epoch(epoch)
+            train_stats = train_one_epoch(
+                model, criterion, data_loader_train,
+                optimizer, device, epoch, loss_scaler,
+                args.clip_grad, mixup_fn,
+                log_writer=log_writer,
+                args=args
+            )
 
-        if args.output_dir and misc.is_main_process():
+            # _, _ = evaluate(data_loader_train, model, device,args.task,epoch, mode='train',num_class=args.nb_classes)
+            val_stats,val_auc_roc = evaluate(data_loader_val, model, device,args.task,epoch, mode='val',num_class=args.nb_classes)
+            # compute_and_save_heatmaps(model, save_dir=args.task+'val_heatmaps')
+            if max_auc<val_auc_roc:
+                max_auc = val_auc_roc
+                
+                if args.output_dir:
+                    misc.save_model(
+                        args=args, model=model, model_without_ddp=model_without_ddp, optimizer=optimizer,
+                        loss_scaler=loss_scaler, epoch=epoch)
+            
             if log_writer is not None:
-                log_writer.flush()
-            with open(os.path.join(args.output_dir, "log.txt"), mode="a", encoding="utf-8") as f:
-                f.write(json.dumps(log_stats) + "\n")
+                log_writer.add_scalar('perf/val_acc1', val_stats['acc1'], epoch)
+                log_writer.add_scalar('perf/val_auc', val_auc_roc, epoch)
+                log_writer.add_scalar('perf/val_loss', val_stats['loss'], epoch)
+                
+            log_stats = {**{f'train_{k}': v for k, v in train_stats.items()},
+                            'epoch': epoch,
+                            'n_parameters': n_parameters}
+
+            if args.output_dir and misc.is_main_process():
+                if log_writer is not None:
+                    log_writer.flush()
+                with open(os.path.join(args.output_dir, "log.txt"), mode="a", encoding="utf-8") as f:
+                    f.write(json.dumps(log_stats) + "\n")
 
                 
     total_time = time.time() - start_time
     total_time_str = str(datetime.timedelta(seconds=int(total_time)))
     print('Training time {}'.format(total_time_str))
-    state_dict_best = torch.load(args.task+'checkpoint-best.pth', map_location='cpu')
+    state_dict_best = torch.load(args.resume, map_location='cpu')
     model_without_ddp.load_state_dict(state_dict_best['model'])
     test_stats,auc_roc = evaluate(data_loader_test, model_without_ddp, device,args.task,epoch=0, mode='test',num_class=args.nb_classes)
     # save_correct_predictions(model, save_folder='Retfound_correct_predictions', transform=transform)

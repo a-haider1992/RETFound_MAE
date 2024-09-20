@@ -401,7 +401,7 @@ def evaluate(data_loader, model, device, task, epoch, mode, num_class):
                 class_labels.append(cls)  # Add the class label for each slice
 
         # Create the figure and plot the bar chart
-        plt.figure(figsize=(12, 8))
+        plt.figure(figsize=(20, 10))
 
         # Create a colormap to assign different colors to each class
         colors = plt.cm.get_cmap('tab20', len(max_correct_values))
@@ -483,29 +483,31 @@ def evaluate(data_loader, model, device, task, epoch, mode, num_class):
     # if mode == 'val':
     #     print(f'Validation Accuracy per patient: {count/len(feature_dict) * 100}%')
     print('Sklearn Metrics - Acc: {:.4f} AUC-roc: {:.4f} AUC-pr: {:.4f} F1-score: {:.4f} MCC: {:.4f}'.format(acc, auc_roc, auc_pr, F1, mcc)) 
-    results_path = task+'_metrics_{}.csv'.format(mode)
-    # if mode == 'val':
-    #     cm = confusion_matrix(true_label_decode_list, prediction_decode_list)
-    #     plt.figure(figsize=(8, 6))
-    #     sns.heatmap(cm, annot=True, fmt='d', cmap='Blues', xticklabels=[0, 1, 2], yticklabels=[0, 1, 2])
-    #     plt.xlabel('Predicted Label')
-    #     plt.ylabel('True Label')
-    #     plt.title('Confusion Matrix Validation')
-    #     # cm.plot(cmap=plt.cm.Blues,number_label=True,normalized=True,plot_lib="matplotlib")
-    #     plt.savefig(task+'confusion_matrix_val.jpg',dpi=600,bbox_inches ='tight')
-    # Check file exists and is empty
+    
+    results_path = task + '_metrics_{}.csv'.format(mode)
+    # Ensure the directory for the results file exists
+    directory = os.path.dirname(results_path)
+    if not os.path.exists(directory) and directory != '':
+        os.makedirs(directory)
+
+    # Check if the file exists
     file_exists = os.path.isfile(results_path)
+    # If the file exists, check if it is empty
     file_empty = os.stat(results_path).st_size == 0 if file_exists else True
+    # Define the header for the CSV file
     header = ['acc', 'sensitivity', 'specificity', 'precision', 'auc_roc', 'auc_pr', 'F1', 'mcc', 'loss']
-    with open(results_path,mode='a',newline='',encoding='utf8') as cfa:
+    # Open the file in append mode and add data
+    with open(results_path, mode='a', newline='', encoding='utf8') as cfa:
         wf = csv.writer(cfa)
-        # If file is empty
-        if file_empty:
+        # If the file does not exist or is empty, write the header first
+        if not file_exists or file_empty:
             wf.writerow(header)
-        data2=[[acc,sensitivity,specificity,precision,auc_roc,auc_pr,F1,mcc,metric_logger.loss]]
-        for i in data2:
-            wf.writerow(i)
-            
+        # Data to write to the CSV file
+        data2 = [[acc, sensitivity, specificity, precision, auc_roc, auc_pr, F1, mcc, metric_logger.loss]]
+        # Write the data to the CSV file
+        for row in data2:
+            wf.writerow(row)
+                
     
     if mode=='test':
         import matplotlib.pyplot as plt
@@ -524,7 +526,7 @@ def evaluate(data_loader, model, device, task, epoch, mode, num_class):
                 class_labels.append(cls)  # Add the class label for each slice
 
         # Create the figure and plot the bar chart
-        plt.figure(figsize=(12, 8))
+        plt.figure(figsize=(20, 10))
 
         # Create a colormap to assign different colors to each class
         colors = plt.cm.get_cmap('tab20', len(max_correct_values))
@@ -545,7 +547,7 @@ def evaluate(data_loader, model, device, task, epoch, mode, num_class):
         plt.xticks(range(len(max_correct_values)), class_labels, rotation=90)
 
         # Add labels and title
-        plt.xlabel('Class and Slices')
+        plt.xlabel('Class')
         plt.ylabel('Correct Predictions (log scale)')
         plt.title('Top 5 Correct Predictions per Class with Corresponding Slices')
 

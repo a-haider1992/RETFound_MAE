@@ -467,6 +467,7 @@ def main(args):
     total_time = time.time() - start_time
     total_time_str = str(datetime.timedelta(seconds=int(total_time)))
     print('Training time {}'.format(total_time_str))
+    # pdb.set_trace()
     state_dict_best = torch.load(args.resume, map_location='cpu')
     model_without_ddp.load_state_dict(state_dict_best['model'])
     test_stats,auc_roc = evaluate(data_loader_test, model_without_ddp, device,args.task,epoch=0, mode='test',num_class=args.nb_classes)

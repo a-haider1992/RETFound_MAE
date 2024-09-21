@@ -9,6 +9,7 @@ from timm.data import create_transform
 from timm.data.constants import IMAGENET_DEFAULT_MEAN, IMAGENET_DEFAULT_STD
 import torch
 import re
+import pdb
 
 # Custom collate function to extract information from the image filenames
 # def custom_collate(batch):
@@ -35,12 +36,12 @@ def custom_collate(batch):
     info = {"NicolaID": [], "Slice": [], "Timepoint": []}
     
     for name in filenames:
-        # print(f"Filename: {name})")
+        # print(f"Filename: {name}")
         # Match NicolaID pattern (adjust the regex according to your filename format)
         match = re.search(r'N1[^_]*', name)  # This regex matches "N" followed by any characters until "_"
         
         # Match Slice pattern (adjust the regex according to your filename format)
-        match1 = re.search(r'oct_(\d+)\.', name)  # This regex matches "oct_" followed by any chars until "."
+        match1 = re.search(r'oct_(\d+)', name)  # This regex matches "oct_" followed by any chars until "."
 
         match2 = re.search(r'(\d+)_oct', name)  # This regex matches "oct_" followed by any digits
         
@@ -48,6 +49,11 @@ def custom_collate(batch):
         info["NicolaID"].append(match.group() if match else "Unknown_NicolaID")
         info["Slice"].append(match1.group(1) if match1 else "Unknown_Slice")
         info["Timepoint"].append(match2.group(1) if match2 else "Unknown_Timepoint")
+
+        if info["Slice"][-1] == "Unknown_Slice":
+            print(f"Filename: {name}")
+            print(info["Slice"])
+            pdb.set_trace()
     
     # Stack images into a tensor and convert labels to tensor
     images_tensor = torch.stack(images)

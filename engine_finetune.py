@@ -195,6 +195,7 @@ def evaluate(data_loader, model, device, task, epoch, mode, num_class):
     feature_dict = {}
     slice_preds = {}
     class_dict = {}
+    patient_dict = {"correct_count":0, "confidence": 0.0}
     total_slices = 0
     for batch in metric_logger.log_every(data_loader, 10, header):
         images = batch[0]
@@ -222,7 +223,7 @@ def evaluate(data_loader, model, device, task, epoch, mode, num_class):
             true_label_onehot_list.extend(true_label.cpu().detach().numpy())
             prediction_list.extend(prediction_softmax.cpu().detach().numpy())
 
-            # for i in range(len(slices)):
+            for i in range(len(slices)):
                 # if key not in slice_preds:
                 #     slice_preds[key] = {"correct": 0}
                 # if prediction_decode[i].item() == true_label_decode[i].item():
@@ -234,41 +235,46 @@ def evaluate(data_loader, model, device, task, epoch, mode, num_class):
                 # slice_preds[slices[i]]["occurence"] += 1
                 # if slices[i] not in feature_dict:
                 #     feature_dict[slices[i]] = {}
-                # if Pid[i] not in feature_dict[slices[i]]:
-                #     feature_dict[slices[i]][Pid[i]] = {"0":0, "1":0, "2":0, "True": true_label_decode[i].item()}
-                # if prediction_decode[i].item() == 0:
-                #     feature_dict[slices[i]][Pid[i]]["0"] += 1
-                # elif prediction_decode[i].item() == 1:
-                #     feature_dict[slices[i]][Pid[i]]["1"] += 1
-                # elif prediction_decode[i].item() == 2:
-                #     feature_dict[slices[i]][Pid[i]]["2"] += 1
+                if Pid[i] not in feature_dict:
+                    feature_dict[Pid[i]] = {"True": true_label_decode[i].item()}
+                if slices[i] not in feature_dict[Pid[i]]:
+                    feature_dict[Pid[i]][slices[i]]= {"0":patient_dict, "1": patient_dict, "2": patient_dict}
+                if prediction_decode[i].item() == 0:
+                    feature_dict[Pid[i]][slices[i]]["0"]["correct_count"] += 1
+                    feature_dict[Pid[i]][slices[i]]["0"]["confidence"] += prediction_softmax[i][0].item() / (len(slices) * len(data_loader))
+                elif prediction_decode[i].item() == 1:
+                    feature_dict[Pid[i]][slices[i]]["1"]["correct_count"] += 1
+                    feature_dict[Pid[i]][slices[i]]["1"]["confidence"] += prediction_softmax[i][1].item() / (len(slices) * len(data_loader))
+                elif prediction_decode[i].item() == 2:
+                    feature_dict[Pid[i]][slices[i]]["2"]["correct_count"] += 1
+                    feature_dict[Pid[i]][slices[i]]["2"]["confidence"] += prediction_softmax[i][2].item() / (len(slices) * len(data_loader))
 
             # logging.info(f'Slice Predictions: {slice_preds}')
 
-            for i in range(len(Pid)):
-                total_slices += 1
+            # for i in range(len(Pid)):
+            #     total_slices += 1
 
-                true_label = true_label_decode[i].item()
-                pid = Pid[i]
-                timepoint = timepoints[i]
-                slice_ = slices[i]
+            #     true_label = true_label_decode[i].item()
+            #     pid = Pid[i]
+            #     timepoint = timepoints[i]
+            #     slice_ = slices[i]
 
-                # Ensure nested dictionary structure exists
-                if true_label not in feature_dict:
-                    feature_dict[true_label] = {}
+            #     # Ensure nested dictionary structure exists
+            #     if true_label not in feature_dict:
+            #         feature_dict[true_label] = {}
 
-                # if pid not in feature_dict[true_label]:
-                #     feature_dict[true_label][pid] = {}
+            #     # if pid not in feature_dict[true_label]:
+            #     #     feature_dict[true_label][pid] = {}
 
-                # if timepoint not in feature_dict[true_label][pid]:
-                #     feature_dict[true_label][pid][timepoint] = {}
+            #     # if timepoint not in feature_dict[true_label][pid]:
+            #     #     feature_dict[true_label][pid][timepoint] = {}
 
-                if slice_ not in feature_dict[true_label]:
-                    feature_dict[true_label][slice_] = {"correct": 0}
+            #     if slice_ not in feature_dict[true_label]:
+            #         feature_dict[true_label][slice_] = {"correct": 0}
 
-                # Increment 'correct' if prediction is accurate
-                if prediction_decode[i].item() == true_label:
-                    feature_dict[true_label][slice_]["correct"] += 1
+            #     # Increment 'correct' if prediction is accurate
+            #     if prediction_decode[i].item() == true_label:
+            #         feature_dict[true_label][slice_]["correct"] += 1
 
         acc1,_ = accuracy(output, target, topk=(1,2))
 
@@ -321,25 +327,96 @@ def evaluate(data_loader, model, device, task, epoch, mode, num_class):
     # unique_counts = {}  # Store the unique count for each key
     # logging.info(f'Keys patient dictionary created for {mode}')
     logging.info(f'-------------------------------------------')
-    logging.info(f'Feature Dictionary created for {mode}')
+    # logging.info(f'Feature Dictionary created for {mode}')
     logging.info(f'Feature dict: {feature_dict}')
     logging.info(f'-------------------------------------------')
     max_count_ = {}
+    # pdb.set_trace()
+    patient_robust_labels = {}
+    for pid, slices in feature_dict.items():
+        # Initialize patient_robust_labels with default values
+        true_label = str(feature_dict[pid].get("True", ""))
+        patient_robust_labels[pid] = {
+            "Best class": "", 
+            "Best confidence": 0.0, 
+            "Best correct count": 0, 
+            "True": true_label, 
+            "relevant slices": []
+        }
+
+        # Create a list to store the slices with their best class and corresponding correct_count and confidence
+        slice_info_list = []
+
+        # Iterate through slices and determine the best class for each slice
+        for slice_key, class_data in slices.items():
+            if slice_key == "True":  # Skip the "True" key
+                continue
+
+            # Find the best class (highest correct_count and confidence) for each slice
+            best_class = None
+            best_correct_count = 0
+            best_confidence = 0.0
+
+            for class_label, data in class_data.items():
+                if data["correct_count"] > best_correct_count or (data["correct_count"] == best_correct_count and data["confidence"] > best_confidence):
+                    best_class = class_label
+                    best_correct_count = data["correct_count"]
+                    best_confidence = data["confidence"]
+
+            # Add the slice and its best class info to the list
+            slice_info_list.append({
+                "slice": slice_key,
+                "best_class": best_class,
+                "correct_count": best_correct_count,
+                "confidence": best_confidence
+            })
+
+        # Sort the slice_info_list first by correct_count and then by confidence
+        sorted_slices = sorted(slice_info_list, key=lambda x: (x["correct_count"], x["confidence"]), reverse=True)
+
+        # Update the Best class, confidence, and correct count with the top slice from the sorted list
+        if sorted_slices:
+            patient_robust_labels[pid]["Best class"] = sorted_slices[0]["best_class"]
+            patient_robust_labels[pid]["Best correct count"] = sorted_slices[0]["correct_count"]
+            patient_robust_labels[pid]["Best confidence"] = sorted_slices[0]["confidence"]
+
+        # Filter relevant slices: these are the ones where the best class matches the true label
+        relevant_slices = [slice_info["slice"] for slice_info in sorted_slices if slice_info["best_class"] == true_label]
+        
+        # Store the relevant slices
+        patient_robust_labels[pid]["relevant slices"] = relevant_slices[:10]
+
+    logging.info(f'Patient Robust Labels: {patient_robust_labels}')
+    logging.info(f'-------------------------------------------')
+    for key, value in patient_robust_labels.items():
+        print(f'Patient: {key}, Best Class: {value["Best class"]}, True: {value["True"]}, Relevant Slices: {value["relevant slices"]}')
+        logging.info(f'Patient: {key}, Best Class: {value["Best class"]}, True: {value["True"]}, Relevant Slices: {value["relevant slices"]}')
+
+    # compute pateint accuracy
+    patient_count = 0
+    for key, value in patient_robust_labels.items():
+        if value["Best class"] == value["True"]:
+            patient_count += 1
+
+    patient_acc = patient_count / len(patient_robust_labels)
+    logging.info(f'Number of patients: {len(patient_robust_labels)}')
+    logging.info(f'Patient Accuracy: {patient_acc}')
+    
 
     # Iterate through the feature_dict to find the top 5 slices with the highest "correct" values for each class
-    for cls_key, slices in feature_dict.items():  # Iterate over classes and their corresponding slices
-        # Sort slices by the "correct" count in descending order
-        sorted_slices = sorted(slices.items(), key=lambda x: x[1]["correct"], reverse=True)
+    # for cls_key, slices in feature_dict.items():  # Iterate over classes and their corresponding slices
+    #     # Sort slices by the "correct" count in descending order
+    #     sorted_slices = sorted(slices.items(), key=lambda x: x[1]["correct"], reverse=True)
         
-        # Get the top 5 slices (or fewer if there are less than 5 slices)
-        top_slices = sorted_slices[:5]
+    #     # Get the top 5 slices (or fewer if there are less than 5 slices)
+    #     top_slices = sorted_slices[:5]
         
-        # Store the top slices and their corresponding "correct" values for this class
-        max_count_[cls_key] = [{"slice": slice_key, "correct": slice_info["correct"]} for slice_key, slice_info in top_slices]
+    #     # Store the top slices and their corresponding "correct" values for this class
+    #     max_count_[cls_key] = [{"slice": slice_key, "correct": slice_info["correct"]} for slice_key, slice_info in top_slices]
 
-    # Print or use the max_count_ dictionary to see the result
-    for cls, top_slices_info in max_count_.items():
-        print(f"Class: {cls}, Top Slices Info: {top_slices_info}")
+    # # Print or use the max_count_ dictionary to see the result
+    # for cls, top_slices_info in max_count_.items():
+    #     print(f"Class: {cls}, Top Slices Info: {top_slices_info}")
 
 
     # logging.info(f'Feature dict: {feature_dict}')
@@ -384,51 +461,51 @@ def evaluate(data_loader, model, device, task, epoch, mode, num_class):
     # logging.info(f'---------------------------------')
     # logging.info(f'Unique Counts: {unique_counts}')
     
-    if mode == 'val':
-        import matplotlib.pyplot as plt
+    # if mode == 'val':
+    #     import matplotlib.pyplot as plt
 
-        # Sample data from max_count_
-        classes = list(max_count_.keys())
-        max_correct_values = []
-        slice_keys = []
-        class_labels = []
+    #     # Sample data from max_count_
+    #     classes = list(max_count_.keys())
+    #     max_correct_values = []
+    #     slice_keys = []
+    #     class_labels = []
 
-        for cls in classes:
-            top_slices = max_count_[cls]  # Get the top slices for this class
-            for slice_info in top_slices:
-                max_correct_values.append(slice_info['correct'])
-                slice_keys.append(slice_info['slice'])
-                class_labels.append(cls)  # Add the class label for each slice
+    #     for cls in classes:
+    #         top_slices = max_count_[cls]  # Get the top slices for this class
+    #         for slice_info in top_slices:
+    #             max_correct_values.append(slice_info['correct'])
+    #             slice_keys.append(slice_info['slice'])
+    #             class_labels.append(cls)  # Add the class label for each slice
 
-        # Create the figure and plot the bar chart
-        plt.figure(figsize=(20, 10))
+    #     # Create the figure and plot the bar chart
+    #     plt.figure(figsize=(20, 10))
 
-        # Create a colormap to assign different colors to each class
-        colors = plt.cm.get_cmap('tab20', len(max_correct_values))
+    #     # Create a colormap to assign different colors to each class
+    #     colors = plt.cm.get_cmap('tab20', len(max_correct_values))
 
-        # Plot the bars with different colors
-        bars = plt.bar(range(len(max_correct_values)), max_correct_values, color=[colors(i) for i in range(len(max_correct_values))])
+    #     # Plot the bars with different colors
+    #     bars = plt.bar(range(len(max_correct_values)), max_correct_values, color=[colors(i) for i in range(len(max_correct_values))])
 
-        # Add slice key and class information inside each bar
-        for bar, slice_key, cls, correct in zip(bars, slice_keys, class_labels, max_correct_values):
-            plt.text(bar.get_x() + bar.get_width() / 2, bar.get_height() / 2,
-                    f'Slice: {slice_key}\nCorrect: {correct}', ha='center', va='center', color='black', fontsize=8, rotation=90)
+    #     # Add slice key and class information inside each bar
+    #     for bar, slice_key, cls, correct in zip(bars, slice_keys, class_labels, max_correct_values):
+    #         plt.text(bar.get_x() + bar.get_width() / 2, bar.get_height() / 2,
+    #                 f'Slice: {slice_key}\nCorrect: {correct}', ha='center', va='center', color='black', fontsize=8, rotation=90)
 
-        # Normalize the Y-axis scale to handle large differences between values
-        plt.yscale('log')  # Log scale for better visualization of bars with low/high values
-        plt.ylim(1, max(max_correct_values) * 1.5)  # Adjust Y-limit to give some padding on top
+    #     # Normalize the Y-axis scale to handle large differences between values
+    #     plt.yscale('log')  # Log scale for better visualization of bars with low/high values
+    #     plt.ylim(1, max(max_correct_values) * 1.5)  # Adjust Y-limit to give some padding on top
 
-        # Set x-ticks to the class labels for better visualization
-        plt.xticks(range(len(max_correct_values)), class_labels, rotation=90)
+    #     # Set x-ticks to the class labels for better visualization
+    #     plt.xticks(range(len(max_correct_values)), class_labels, rotation=90)
 
-        # Add labels and title
-        plt.xlabel('Class and Slices')
-        plt.ylabel('Correct Predictions (log scale)')
-        plt.title('Top 5 Correct Predictions per Class with Corresponding Slices')
+    #     # Add labels and title
+    #     plt.xlabel('Class and Slices')
+    #     plt.ylabel('Correct Predictions (log scale)')
+    #     plt.title('Top 5 Correct Predictions per Class with Corresponding Slices')
 
-        # Display the plot
-        plt.tight_layout()
-        plt.savefig(task+'_top5_val_max_correct_predictions_per_class.jpg', dpi=150, bbox_inches='tight')
+    #     # Display the plot
+    #     plt.tight_layout()
+    #     plt.savefig(task+'_top5_val_max_correct_predictions_per_class.jpg', dpi=150, bbox_inches='tight')
 
         # import matplotlib.pyplot as plt
         # keys = list(slice_preds.keys())
@@ -510,50 +587,51 @@ def evaluate(data_loader, model, device, task, epoch, mode, num_class):
                 
     
     if mode=='test':
-        import matplotlib.pyplot as plt
+        pass
+        # import matplotlib.pyplot as plt
 
-        # Sample data from max_count_
-        classes = list(max_count_.keys())
-        max_correct_values = []
-        slice_keys = []
-        class_labels = []
+        # # Sample data from max_count_
+        # classes = list(max_count_.keys())
+        # max_correct_values = []
+        # slice_keys = []
+        # class_labels = []
 
-        for cls in classes:
-            top_slices = max_count_[cls]  # Get the top slices for this class
-            for slice_info in top_slices:
-                max_correct_values.append(slice_info['correct'])
-                slice_keys.append(slice_info['slice'])
-                class_labels.append(cls)  # Add the class label for each slice
+        # for cls in classes:
+        #     top_slices = max_count_[cls]  # Get the top slices for this class
+        #     for slice_info in top_slices:
+        #         max_correct_values.append(slice_info['correct'])
+        #         slice_keys.append(slice_info['slice'])
+        #         class_labels.append(cls)  # Add the class label for each slice
 
-        # Create the figure and plot the bar chart
-        plt.figure(figsize=(20, 10))
+        # # Create the figure and plot the bar chart
+        # plt.figure(figsize=(20, 10))
 
-        # Create a colormap to assign different colors to each class
-        colors = plt.cm.get_cmap('tab20', len(max_correct_values))
+        # # Create a colormap to assign different colors to each class
+        # colors = plt.cm.get_cmap('tab20', len(max_correct_values))
 
-        # Plot the bars with different colors
-        bars = plt.bar(range(len(max_correct_values)), max_correct_values, color=[colors(i) for i in range(len(max_correct_values))])
+        # # Plot the bars with different colors
+        # bars = plt.bar(range(len(max_correct_values)), max_correct_values, color=[colors(i) for i in range(len(max_correct_values))])
 
-        # Add slice key and class information inside each bar
-        for bar, slice_key, cls, correct in zip(bars, slice_keys, class_labels, max_correct_values):
-            plt.text(bar.get_x() + bar.get_width() / 2, bar.get_height() / 2,
-                    f'Slice: {slice_key}\nCorrect: {correct}', ha='center', va='center', color='black', fontsize=8, rotation=90)
+        # # Add slice key and class information inside each bar
+        # for bar, slice_key, cls, correct in zip(bars, slice_keys, class_labels, max_correct_values):
+        #     plt.text(bar.get_x() + bar.get_width() / 2, bar.get_height() / 2,
+        #             f'Slice: {slice_key}\nCorrect: {correct}', ha='center', va='center', color='black', fontsize=8, rotation=90)
 
-        # Normalize the Y-axis scale to handle large differences between values
-        plt.yscale('log')  # Log scale for better visualization of bars with low/high values
-        plt.ylim(1, max(max_correct_values) * 1.5)  # Adjust Y-limit to give some padding on top
+        # # Normalize the Y-axis scale to handle large differences between values
+        # plt.yscale('log')  # Log scale for better visualization of bars with low/high values
+        # plt.ylim(1, max(max_correct_values) * 1.5)  # Adjust Y-limit to give some padding on top
 
-        # Set x-ticks to the class labels for better visualization
-        plt.xticks(range(len(max_correct_values)), class_labels, rotation=90)
+        # # Set x-ticks to the class labels for better visualization
+        # plt.xticks(range(len(max_correct_values)), class_labels, rotation=90)
 
-        # Add labels and title
-        plt.xlabel('Class')
-        plt.ylabel('Correct Predictions (log scale)')
-        plt.title('Top 5 Correct Predictions per Class with Corresponding Slices')
+        # # Add labels and title
+        # plt.xlabel('Class')
+        # plt.ylabel('Correct Predictions (log scale)')
+        # plt.title('Top 5 Correct Predictions per Class with Corresponding Slices')
 
-        # Display the plot
-        plt.tight_layout()
-        plt.savefig(task+'_top5_test_max_correct_predictions_per_class.jpg', dpi=150, bbox_inches='tight')
+        # # Display the plot
+        # plt.tight_layout()
+        # plt.savefig(task+'_top5_test_max_correct_predictions_per_class.jpg', dpi=150, bbox_inches='tight')
 
         # print(f'Test Accuracy per patient: {count/len(feature_dict) * 100}%')
         # cm = confusion_matrix(true_label_decode_list, prediction_decode_list)

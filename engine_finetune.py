@@ -23,6 +23,7 @@ import seaborn as sns
 from sklearn.manifold import TSNE
 from sklearn.metrics import matthews_corrcoef, f1_score
 from collections import Counter
+import copy
 
 import pdb
 import logging
@@ -238,7 +239,7 @@ def evaluate(data_loader, model, device, task, epoch, mode, num_class):
                 if Pid[i] not in feature_dict:
                     feature_dict[Pid[i]] = {"True": true_label_decode[i].item()}
                 if slices[i] not in feature_dict[Pid[i]]:
-                    feature_dict[Pid[i]][slices[i]]= {"0":patient_dict, "1": patient_dict, "2": patient_dict}
+                    feature_dict[Pid[i]][slices[i]]= {"0":copy.deepcopy(patient_dict), "1": copy.deepcopy(patient_dict), "2": copy.deepcopy(patient_dict)}
                 if prediction_decode[i].item() == 0:
                     feature_dict[Pid[i]][slices[i]]["0"]["correct_count"] += 1
                     feature_dict[Pid[i]][slices[i]]["0"]["confidence"] += prediction_softmax[i][0].item() / (len(slices) * len(data_loader))
@@ -358,7 +359,7 @@ def evaluate(data_loader, model, device, task, epoch, mode, num_class):
             best_confidence = 0.0
 
             for class_label, data in class_data.items():
-                if data["correct_count"] > best_correct_count or (data["correct_count"] == best_correct_count and data["confidence"] > best_confidence):
+                if data["correct_count"] >= best_correct_count and data["confidence"] > best_confidence:
                     best_class = class_label
                     best_correct_count = data["correct_count"]
                     best_confidence = data["confidence"]
@@ -372,7 +373,7 @@ def evaluate(data_loader, model, device, task, epoch, mode, num_class):
             })
 
         # Sort the slice_info_list first by correct_count and then by confidence
-        sorted_slices = sorted(slice_info_list, key=lambda x: (x["correct_count"], x["confidence"]), reverse=True)
+        sorted_slices = sorted(slice_info_list, key=lambda x: (x["confidence"]), reverse=True)
 
         # Update the Best class, confidence, and correct count with the top slice from the sorted list
         if sorted_slices:
@@ -384,13 +385,27 @@ def evaluate(data_loader, model, device, task, epoch, mode, num_class):
         relevant_slices = [slice_info["slice"] for slice_info in sorted_slices if slice_info["best_class"] == true_label]
         
         # Store the relevant slices
-        patient_robust_labels[pid]["relevant slices"] = relevant_slices[:10]
+        patient_robust_labels[pid]["relevant slices"] = relevant_slices[:15]
 
-    logging.info(f'Patient Robust Labels: {patient_robust_labels}')
+    # logging.info(f'Patient Robust Labels: {patient_robust_labels}')
     logging.info(f'-------------------------------------------')
+    common_slices = None  # Initially set to None
     for key, value in patient_robust_labels.items():
-        print(f'Patient: {key}, Best Class: {value["Best class"]}, True: {value["True"]}, Relevant Slices: {value["relevant slices"]}')
-        logging.info(f'Patient: {key}, Best Class: {value["Best class"]}, True: {value["True"]}, Relevant Slices: {value["relevant slices"]}')
+        # Check if the Best class matches the True label for this patient
+        if value["Best class"] == value["True"]:
+            # If common_slices is None, initialize it with the current patient's relevant slices
+            if common_slices is None:
+                common_slices = set(value["relevant slices"])
+            else:
+                # Perform intersection to keep only common slices
+                common_slices.intersection_update(value["relevant slices"])
+
+    # If common_slices remains None, it means no matching slices were found, so we set it to an empty set
+    if common_slices is None:
+        common_slices = set()
+            
+    logging.info(f'Common Slices: {common_slices}')
+    logging.info(f'Number of common slices: {len(common_slices)}')
 
     # compute pateint accuracy
     patient_count = 0
@@ -399,6 +414,7 @@ def evaluate(data_loader, model, device, task, epoch, mode, num_class):
             patient_count += 1
 
     patient_acc = patient_count / len(patient_robust_labels)
+    logging.info(f'Correct Patient Count: {patient_count}')
     logging.info(f'Number of patients: {len(patient_robust_labels)}')
     logging.info(f'Patient Accuracy: {patient_acc}')
     

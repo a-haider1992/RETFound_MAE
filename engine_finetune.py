@@ -373,7 +373,7 @@ def evaluate(data_loader, model, device, task, epoch, mode, num_class):
             })
 
         # Sort the slice_info_list first by correct_count and then by confidence
-        sorted_slices = sorted(slice_info_list, key=lambda x: (x["confidence"]), reverse=True)
+        sorted_slices = sorted(slice_info_list, key=lambda x: (x["correct_count"],x["confidence"]), reverse=True)
 
         # Update the Best class, confidence, and correct count with the top slice from the sorted list
         if sorted_slices:
@@ -385,7 +385,7 @@ def evaluate(data_loader, model, device, task, epoch, mode, num_class):
         relevant_slices = [slice_info["slice"] for slice_info in sorted_slices if slice_info["best_class"] == true_label]
         
         # Store the relevant slices
-        patient_robust_labels[pid]["relevant slices"] = relevant_slices[:15]
+        patient_robust_labels[pid]["relevant slices"] = relevant_slices[:40]
 
     # logging.info(f'Patient Robust Labels: {patient_robust_labels}')
     logging.info(f'-------------------------------------------')

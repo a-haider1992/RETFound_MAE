@@ -518,16 +518,23 @@ def evaluate(data_loader, model, device, task, epoch, mode, num_class):
         
         # Convert the slice_data dict to a list of dictionaries to allow sorting
         slice_list = [{"key": key, "slice":value["slice"], "correct": value["correct"]} for key, value in slice_data.items()]
+        for key, data in slice_data.items():
+            if key not in slice_preds:
+                slice_preds[key] = {"correct": 0}
+            slice_preds[key]["correct"] += data["correct"]
         
         # Sort the list of slice data dictionaries by the "correct" field in descending order
         sorted_slices = sorted(slice_list, key=lambda x: x["correct"], reverse=True)
         
         # Store the top 5 slices for each class in sorted_cls_slices
         sorted_cls_slices[cls_key] = sorted_slices[:5]
-
+    
     # Logging the sorted class dictionary
     logging.info(f'Sorted Class Dict: {sorted_cls_slices}')
     pdb.set_trace()
+    logging.info(f'-------------------------------------------')
+    slice_preds = dict(sorted(slice_preds.items(), key=lambda item: float(item[0])))
+    logging.info(f'Slice Predictions: {slice_preds}')
 
         # logging.info(f'Class: {key}')
         # for data in sorted_slices:
@@ -672,47 +679,47 @@ def evaluate(data_loader, model, device, task, epoch, mode, num_class):
     if mode=='test':
         import matplotlib.pyplot as plt
         # Prepare data for plotting
-        max_correct_values = []
-        slice_keys = []
-        class_labels = []
-        norm_slice_keys = []
+        # max_correct_values = []
+        # slice_keys = []
+        # class_labels = []
+        # norm_slice_keys = []
 
-        for cls_key, slices in sorted_cls_slices.items():
-            for slice_info in slices:
-                max_correct_values.append(slice_info['correct'])
-                slice_keys.append(slice_info['slice'])
-                class_labels.append(cls_key)  # Add the class label for each slice
-                norm_slice_keys.append(slice_info['key'])  # Add normalized slice key
+        # for cls_key, slices in sorted_cls_slices.items():
+        #     for slice_info in slices:
+        #         max_correct_values.append(slice_info['correct'])
+        #         slice_keys.append(slice_info['slice'])
+        #         class_labels.append(cls_key)  # Add the class label for each slice
+        #         norm_slice_keys.append(slice_info['key'])  # Add normalized slice key
 
-        # Create the figure and plot the bar chart
-        plt.figure(figsize=(20, 10))
+        # # Create the figure and plot the bar chart
+        # plt.figure(figsize=(20, 10))
 
-        # Create a colormap to assign different colors to each class
-        colors = plt.cm.get_cmap('tab20', len(max_correct_values))
+        # # Create a colormap to assign different colors to each class
+        # colors = plt.cm.get_cmap('tab20', len(max_correct_values))
 
-        # Plot the bars with different colors
-        bars = plt.bar(range(len(max_correct_values)), max_correct_values, color=[colors(i) for i in range(len(max_correct_values))])
+        # # Plot the bars with different colors
+        # bars = plt.bar(range(len(max_correct_values)), max_correct_values, color=[colors(i) for i in range(len(max_correct_values))])
 
-        # Add slice key, normalized slice key, and class information inside each bar
-        for bar, slice_key, norm_key, correct in zip(bars, slice_keys, norm_slice_keys, max_correct_values):
-            plt.text(bar.get_x() + bar.get_width() / 2, bar.get_height() / 2,
-                    f'Slice: {slice_key}\nNorm Key: {norm_key}\nCorrect: {correct}', ha='center', va='center', color='black', fontsize=10, rotation=90)
+        # # Add slice key, normalized slice key, and class information inside each bar
+        # for bar, slice_key, norm_key, correct in zip(bars, slice_keys, norm_slice_keys, max_correct_values):
+        #     plt.text(bar.get_x() + bar.get_width() / 2, bar.get_height() / 2,
+        #             f'Slice: {slice_key}\nNorm Key: {norm_key}\nCorrect: {correct}', ha='center', va='center', color='black', fontsize=10, rotation=90)
 
-        # Set Y-limit to give some padding on top
-        plt.yscale('log')
-        plt.ylim(1, max(max_correct_values) * 1.5)
+        # # Set Y-limit to give some padding on top
+        # plt.yscale('log')
+        # plt.ylim(1, max(max_correct_values) * 1.5)
 
-        # Set x-ticks to the class labels for better visualization
-        plt.xticks(range(len(max_correct_values)), class_labels, rotation=90)
+        # # Set x-ticks to the class labels for better visualization
+        # plt.xticks(range(len(max_correct_values)), class_labels, rotation=90)
 
-        # Add labels and title
-        plt.xlabel('Class')
-        plt.ylabel('Correct Predictions')
-        plt.title('Top 5 Correct Predictions per Class with Corresponding Slices (CFH)')
+        # # Add labels and title
+        # plt.xlabel('Class')
+        # plt.ylabel('Correct Predictions (log-scale)')
+        # plt.title('Top 5 Correct Predictions per Class with Corresponding Slices (rs570618)')
 
-        # Display the plot
-        plt.tight_layout()
-        plt.savefig(task+'top5_test_max_correct_predictions_per_class.jpg', dpi=150, bbox_inches='tight')
+        # # Display the plot
+        # plt.tight_layout()
+        # plt.savefig(task+'top5_test_max_correct_predictions_per_class.jpg', dpi=150, bbox_inches='tight')
 
         # Sample data from max_count_
         # classes = list(max_count_.keys())
@@ -769,22 +776,28 @@ def evaluate(data_loader, model, device, task, epoch, mode, num_class):
         # plt.savefig(task+'confusion_matrix_test.jpg',dpi=600,bbox_inches ='tight')
 
         # slice patient count graph
-        # import matplotlib.pyplot as plt
-        # keys = list(slice_preds.keys())
-        # correct_values = [v["correct"] for v in slice_preds.values()]
-        # # Plotting the values
-        # plt.plot(keys, correct_values, marker='o')
-        # # Adding labels and title
-        # plt.xlabel('Slice')
-        # plt.ylabel('Correct Predictions')
-        # plt.title('Correct predictions frequency (Validation set)')
-        # # Show only a few equidistant x-ticks: minimum, maximum, and some in between
-        # num_ticks = 10  # Number of x-ticks you want to display
-        # tick_positions = np.linspace(0, len(keys) - 1, num_ticks, dtype=int)  # Generate equidistant indices
-        # plt.xticks(tick_positions, [keys[i] for i in tick_positions], rotation=25)
-        # # Show grid and plot
-        # plt.grid(True)
-        # plt.savefig(task+'_slice_count_test.jpg', dpi=600, bbox_inches='tight')
+        plt.figure(figsize=(20, 10))
+
+        keys = list(slice_preds.keys())
+        correct_values = [v["correct"] for v in slice_preds.values()]
+
+        # Plotting the values
+        plt.plot(keys, correct_values, marker='o')
+
+        # Adding labels and title
+        plt.xlabel('Slice')
+        plt.ylabel('Correct Predictions')
+        plt.title('Correct Predictions Frequency')
+
+        # Show only a few equidistant x-ticks: minimum, maximum, and some in between
+        num_ticks = 5  # Number of x-ticks you want to display
+        tick_positions = np.linspace(0, len(keys) - 1, num_ticks, dtype=int)  # Generate equidistant integer indices
+
+        plt.xticks(tick_positions, [keys[i] for i in tick_positions], rotation=25)
+
+        # Show grid and plot
+        plt.grid(True)
+        plt.savefig(task + '_slice_count_test.jpg', dpi=150, bbox_inches='tight')
     
     return {k: meter.global_avg for k, meter in metric_logger.meters.items()},auc_roc
 

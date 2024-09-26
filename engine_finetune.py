@@ -198,6 +198,8 @@ def evaluate(data_loader, model, device, task, epoch, mode, num_class):
     class_dict = {}
     patient_dict = {"correct_count":0, "confidence": 0.0}
     total_slices = 0
+    max_records = 1500
+    loaded_records = 0
     for batch in metric_logger.log_every(data_loader, 10, header):
         images = batch[0]
         target = batch[-2]
@@ -209,6 +211,10 @@ def evaluate(data_loader, model, device, task, epoch, mode, num_class):
         Pid = info['NicolaID']
         slices = info['Slice']
         timepoints = info['Timepoint']
+
+        # loaded_records += len(Pid)
+        # if loaded_records >= max_records:
+        #     break
 
         # compute output
         with torch.cuda.amp.autocast():
@@ -224,7 +230,7 @@ def evaluate(data_loader, model, device, task, epoch, mode, num_class):
             true_label_onehot_list.extend(true_label.cpu().detach().numpy())
             prediction_list.extend(prediction_softmax.cpu().detach().numpy())
 
-            for i in range(len(slices)):
+            # for i in range(len(slices)):
                 # if key not in slice_preds:
                 #     slice_preds[key] = {"correct": 0}
                 # if prediction_decode[i].item() == true_label_decode[i].item():
@@ -236,46 +242,46 @@ def evaluate(data_loader, model, device, task, epoch, mode, num_class):
                 # slice_preds[slices[i]]["occurence"] += 1
                 # if slices[i] not in feature_dict:
                 #     feature_dict[slices[i]] = {}
-                if Pid[i] not in feature_dict:
-                    feature_dict[Pid[i]] = {"True": true_label_decode[i].item()}
-                if slices[i] not in feature_dict[Pid[i]]:
-                    feature_dict[Pid[i]][slices[i]]= {"0":copy.deepcopy(patient_dict), "1": copy.deepcopy(patient_dict), "2": copy.deepcopy(patient_dict)}
-                if prediction_decode[i].item() == 0:
-                    feature_dict[Pid[i]][slices[i]]["0"]["correct_count"] += 1
-                    feature_dict[Pid[i]][slices[i]]["0"]["confidence"] += prediction_softmax[i][0].item() / (len(slices) * len(data_loader))
-                elif prediction_decode[i].item() == 1:
-                    feature_dict[Pid[i]][slices[i]]["1"]["correct_count"] += 1
-                    feature_dict[Pid[i]][slices[i]]["1"]["confidence"] += prediction_softmax[i][1].item() / (len(slices) * len(data_loader))
-                elif prediction_decode[i].item() == 2:
-                    feature_dict[Pid[i]][slices[i]]["2"]["correct_count"] += 1
-                    feature_dict[Pid[i]][slices[i]]["2"]["confidence"] += prediction_softmax[i][2].item() / (len(slices) * len(data_loader))
+                # if Pid[i] not in feature_dict:
+                #     feature_dict[Pid[i]] = {"True": true_label_decode[i].item()}
+                # if slices[i] not in feature_dict[Pid[i]]:
+                #     feature_dict[Pid[i]][slices[i]]= {"0":copy.deepcopy(patient_dict), "1": copy.deepcopy(patient_dict), "2": copy.deepcopy(patient_dict)}
+                # if prediction_decode[i].item() == 0:
+                #     feature_dict[Pid[i]][slices[i]]["0"]["correct_count"] += 1
+                #     feature_dict[Pid[i]][slices[i]]["0"]["confidence"] += prediction_softmax[i][0].item() / (len(slices) * len(data_loader))
+                # elif prediction_decode[i].item() == 1:
+                #     feature_dict[Pid[i]][slices[i]]["1"]["correct_count"] += 1
+                #     feature_dict[Pid[i]][slices[i]]["1"]["confidence"] += prediction_softmax[i][1].item() / (len(slices) * len(data_loader))
+                # elif prediction_decode[i].item() == 2:
+                #     feature_dict[Pid[i]][slices[i]]["2"]["correct_count"] += 1
+                #     feature_dict[Pid[i]][slices[i]]["2"]["confidence"] += prediction_softmax[i][2].item() / (len(slices) * len(data_loader))
 
             # logging.info(f'Slice Predictions: {slice_preds}')
 
-            # for i in range(len(Pid)):
-            #     total_slices += 1
+            for i in range(len(Pid)):
+                total_slices += 1
 
-            #     true_label = true_label_decode[i].item()
-            #     pid = Pid[i]
-            #     timepoint = timepoints[i]
-            #     slice_ = slices[i]
+                true_label = true_label_decode[i].item()
+                pid = Pid[i]
+                timepoint = timepoints[i]
+                slice_ = slices[i]
 
-            #     # Ensure nested dictionary structure exists
-            #     if true_label not in feature_dict:
-            #         feature_dict[true_label] = {}
+                # Ensure nested dictionary structure exists
+                if true_label not in feature_dict:
+                    feature_dict[true_label] = {}
 
-            #     # if pid not in feature_dict[true_label]:
-            #     #     feature_dict[true_label][pid] = {}
+                if pid not in feature_dict[true_label]:
+                    feature_dict[true_label][pid] = {}
 
-            #     # if timepoint not in feature_dict[true_label][pid]:
-            #     #     feature_dict[true_label][pid][timepoint] = {}
+                if timepoint not in feature_dict[true_label][pid]:
+                    feature_dict[true_label][pid][timepoint] = {}
 
-            #     if slice_ not in feature_dict[true_label]:
-            #         feature_dict[true_label][slice_] = {"correct": 0}
+                if slice_ not in feature_dict[true_label][pid][timepoint]:
+                    feature_dict[true_label][pid][timepoint][slice_] = {"correct": 0}
 
-            #     # Increment 'correct' if prediction is accurate
-            #     if prediction_decode[i].item() == true_label:
-            #         feature_dict[true_label][slice_]["correct"] += 1
+                # Increment 'correct' if prediction is accurate
+                if prediction_decode[i].item() == true_label:
+                    feature_dict[true_label][pid][timepoint][slice_]["correct"] += 1
 
         acc1,_ = accuracy(output, target, topk=(1,2))
 
@@ -333,90 +339,111 @@ def evaluate(data_loader, model, device, task, epoch, mode, num_class):
     logging.info(f'-------------------------------------------')
     max_count_ = {}
     # pdb.set_trace()
-    patient_robust_labels = {}
-    for pid, slices in feature_dict.items():
-        # Initialize patient_robust_labels with default values
-        true_label = str(feature_dict[pid].get("True", ""))
-        patient_robust_labels[pid] = {
-            "Best class": "", 
-            "Best confidence": 0.0, 
-            "Best correct count": 0, 
-            "True": true_label, 
-            "relevant slices": []
-        }
+    # patient_robust_labels = {}
+    # for pid, slices in feature_dict.items():
+    #     # Initialize patient_robust_labels with default values
+    #     true_label = str(feature_dict[pid].get("True", ""))
+    #     patient_robust_labels[pid] = {
+    #         "Best class": "", 
+    #         "Best confidence": 0.0, 
+    #         "Best correct count": 0, 
+    #         "True": true_label, 
+    #         "relevant slices": []
+    #     }
 
-        # Create a list to store the slices with their best class and corresponding correct_count and confidence
-        slice_info_list = []
+    #     # Create a list to store the slices with their best class and corresponding correct_count and confidence
+    #     slice_info_list = []
 
-        # Iterate through slices and determine the best class for each slice
-        for slice_key, class_data in slices.items():
-            if slice_key == "True":  # Skip the "True" key
-                continue
+    #     # Iterate through slices and determine the best class for each slice
+    #     for slice_key, class_data in slices.items():
+    #         if slice_key == "True":  # Skip the "True" key
+    #             continue
 
-            # Find the best class (highest correct_count and confidence) for each slice
-            best_class = None
-            best_correct_count = 0
-            best_confidence = 0.0
+    #         # Find the best class (highest correct_count and confidence) for each slice
+    #         best_class = None
+    #         best_correct_count = 0
+    #         best_confidence = 0.0
 
-            for class_label, data in class_data.items():
-                if data["correct_count"] >= best_correct_count and data["confidence"] > best_confidence:
-                    best_class = class_label
-                    best_correct_count = data["correct_count"]
-                    best_confidence = data["confidence"]
+    #         for class_label, data in class_data.items():
+    #             if data["correct_count"] >= best_correct_count and data["confidence"] > best_confidence:
+    #                 best_class = class_label
+    #                 best_correct_count = data["correct_count"]
+    #                 best_confidence = data["confidence"]
 
-            # Add the slice and its best class info to the list
-            slice_info_list.append({
-                "slice": slice_key,
-                "best_class": best_class,
-                "correct_count": best_correct_count,
-                "confidence": best_confidence
-            })
+    #         # Add the slice and its best class info to the list
+    #         slice_info_list.append({
+    #             "slice": slice_key,
+    #             "best_class": best_class,
+    #             "correct_count": best_correct_count,
+    #             "confidence": best_confidence
+    #         })
 
-        # Sort the slice_info_list first by correct_count and then by confidence
-        sorted_slices = sorted(slice_info_list, key=lambda x: (x["correct_count"],x["confidence"]), reverse=True)
+    #     # Sort the slice_info_list first by correct_count and then by confidence
+    #     sorted_slices = sorted(slice_info_list, key=lambda x: (x["correct_count"], x["confidence"]), reverse=True)
+    #     # print(sorted_slices)
 
-        # Update the Best class, confidence, and correct count with the top slice from the sorted list
-        if sorted_slices:
-            patient_robust_labels[pid]["Best class"] = sorted_slices[0]["best_class"]
-            patient_robust_labels[pid]["Best correct count"] = sorted_slices[0]["correct_count"]
-            patient_robust_labels[pid]["Best confidence"] = sorted_slices[0]["confidence"]
+    #     # Update the Best class, confidence, and correct count with the top slice from the sorted list
+    #     if sorted_slices:
+    #         patient_robust_labels[pid]["Best class"] = sorted_slices[0]["best_class"]
+    #         patient_robust_labels[pid]["Best correct count"] = sorted_slices[0]["correct_count"]
+    #         patient_robust_labels[pid]["Best confidence"] = sorted_slices[0]["confidence"]
 
-        # Filter relevant slices: these are the ones where the best class matches the true label
-        relevant_slices = [slice_info["slice"] for slice_info in sorted_slices if slice_info["best_class"] == true_label]
+    #     # Filter relevant slices: these are the ones where the best class matches the true label
+    #     relevant_slices = [slice_info["slice"] for slice_info in sorted_slices if slice_info["best_class"] == true_label]
         
-        # Store the relevant slices
-        patient_robust_labels[pid]["relevant slices"] = relevant_slices[:40]
+    #     # Store the relevant slices
+    #     patient_robust_labels[pid]["relevant slices"] = relevant_slices[:15]
 
     # logging.info(f'Patient Robust Labels: {patient_robust_labels}')
-    logging.info(f'-------------------------------------------')
-    common_slices = None  # Initially set to None
-    for key, value in patient_robust_labels.items():
-        # Check if the Best class matches the True label for this patient
-        if value["Best class"] == value["True"]:
-            # If common_slices is None, initialize it with the current patient's relevant slices
-            if common_slices is None:
-                common_slices = set(value["relevant slices"])
-            else:
-                # Perform intersection to keep only common slices
-                common_slices.intersection_update(value["relevant slices"])
+    # logging.info(f'-------------------------------------------')
+    # pdb.set_trace()
+    # common_slices = None  # Initially set to None
 
-    # If common_slices remains None, it means no matching slices were found, so we set it to an empty set
-    if common_slices is None:
-        common_slices = set()
+    # Top 10 pateinets with correct predictions
+    # count = 0
+    # logging.info(f'-------------------------------------------')
+    # logging.info(f'Top 15 relevant slices per patient {task} {mode}')
+    # logging.info(f'----Top 15 slices are sorted based on both the highest correct count and confidence----')
+    # logging.info(f'Patient: Best Class: True: Relevant Slices')
+    # slice_count = {}
+    # for key, value in patient_robust_labels.items():
+    #     if value["Best class"] == value["True"] and value["Best correct count"] > 0 and value["Best confidence"] > 0.0 and value["relevant slices"]:
+    #         print(f'Patient: {key}, Best Class: {value["Best class"]}, True: {value["True"]}, Relevant Slices: {value["relevant slices"]}')
+    #         logging.info(f'Patient: {key}, Best Class: {value["Best class"]}, True: {value["True"]}, Relevant Slices: {value["relevant slices"]}')
+    #         for slice_ in value["relevant slices"]:
+    #             if slice_ not in slice_count:
+    #                 slice_count[slice_] = 0
+    #             slice_count[slice_] += 1
+    # logging.info(f'-------------------------------------------')
+    # modal_slice = max(slice_count, key=slice_count.get)
+    # logging.info(f'Modal Slice : {modal_slice} for task {task} {mode}')
+    #     # print(f'Patient: {key}, Best Class: {value["Best class"]}, True: {value["True"]}, Relevant Slices: {value["relevant slices"]}')
+        
+    #     # Initialize common_slices if it's None
+    #     if common_slices is None:
+    #         common_slices = set(value["relevant slices"])
+    #     else:
+    #         # Update only if relevant slices are not empty
+    #         if value["relevant slices"]:
+    #             common_slices.intersection_update(value["relevant slices"])
+
+    # # If common_slices is still None, set it to an empty set (in case there were no relevant slices)
+    # common_slices = common_slices if common_slices is not None else set()
             
-    logging.info(f'Common Slices: {common_slices}')
-    logging.info(f'Number of common slices: {len(common_slices)}')
+    # logging.info(f'Common Slices: {common_slices}')
+    # logging.info(f'Number of common slices: {len(common_slices)}')
 
     # compute pateint accuracy
-    patient_count = 0
-    for key, value in patient_robust_labels.items():
-        if value["Best class"] == value["True"]:
-            patient_count += 1
+    # patient_count = 0
+    # for key, value in patient_robust_labels.items():
+    #     if value["Best class"] == value["True"]:
+    #         patient_count += 1
 
-    patient_acc = patient_count / len(patient_robust_labels)
-    logging.info(f'Correct Patient Count: {patient_count}')
-    logging.info(f'Number of patients: {len(patient_robust_labels)}')
-    logging.info(f'Patient Accuracy: {patient_acc}')
+    # patient_acc = patient_count / len(patient_robust_labels)
+    # logging.info(f'Correct Patient Count: {patient_count}')
+    # logging.info(f'Number of patients: {len(patient_robust_labels)}')
+    # logging.info(f'Patient Average Accuracy: {patient_acc}')
+    # pdb.set_trace()
     
 
     # Iterate through the feature_dict to find the top 5 slices with the highest "correct" values for each class
@@ -437,19 +464,28 @@ def evaluate(data_loader, model, device, task, epoch, mode, num_class):
 
     # logging.info(f'Feature dict: {feature_dict}')
     # max_count_ = {"max":0, "patient":"", "timepoint": "","slice": "", "probability": 0.0}
-    # max_count_ = {}
-    # for cls_key, cls_value in feature_dict.items():
-    #     for key, value in cls_value.items():
-    #         for timepoint, slices in value.items():
-    #             max_count_[cls_key] = []
-    #             max_pred = max(slices.values(), key=lambda x: x["correct"])
-    #             for slice_key, patients_count in slices.items():
-    #                 val = patients_count["correct"]
-    #                 if val == max_pred:
-    #                     max_count_[cls_key].append({"patient": key, "timepoint": timepoint, "slice": slice_key, "correct": val})
-                        # norm_slice_key = int(slice_key) / len(slices.keys())
-                        # # print(f'Normalised Slice: {norm_slice_key}')
-                        # norm_slice_key = str(norm_slice_key)
+    max_count_ = {}
+    for cls_key, cls_value in feature_dict.items():
+        if cls_key not in class_dict:
+            class_dict[cls_key] = {}
+
+        for key, value in cls_value.items():
+            for timepoint, slices in value.items():
+                max_count_[cls_key] = []
+                max_pred = max(slices.values(), key=lambda x: x["correct"])
+                for slice_key, patients_count in slices.items():
+                    val = patients_count["correct"]
+                    # if val == max_pred:
+                    # max_count_[cls_key].append({"patient": key, "timepoint": timepoint, "slice": slice_key, "correct": val})
+                    norm_slice_key = int(slice_key) / len(slices.keys())
+                    # 2 point precision
+                    norm_slice_key = round(norm_slice_key, 2)
+                    # print(f'Normalised Slice: {norm_slice_key}')
+                    norm_slice_key = str(norm_slice_key)
+                    if norm_slice_key not in class_dict[cls_key]:
+                        class_dict[cls_key][norm_slice_key] = {"correct": 0, "timepoint": timepoint, "slice": slice_key}
+                    class_dict[cls_key][norm_slice_key]["correct"] += val
+
                         # if norm_slice_key not in slice_preds:
                         #     slice_preds[norm_slice_key] = {"correct": 0, "probability": 0.0}
                         # slice_preds[norm_slice_key]["correct"] += val
@@ -463,9 +499,40 @@ def evaluate(data_loader, model, device, task, epoch, mode, num_class):
                         # logging.info(f'Key: {key}, Timepoint: {timepoint}, Slice: {slice_key}, Patients: {patients_count}')
                 # logging.info(f'Slice Predictions: {slice_preds}')
     
-    # logging.info(f'Slice Predictions: {slice_preds}')
-    # logging.info(f'Max count dict per class : {max_count_}')
-    logging.info(f'-------------------------------------------')
+    # logging.info(f'Before Sorting:')
+
+    # Print class_dict before sorting
+    # for key, value in class_dict.items():
+    #     logging.info(f'Class: {key}')
+    #     for data in value:
+    #         logging.info(f'Slice norm key: {data["key"]}, Slice: {data["slice"]}, Timepoint: {data["timepoint"]}, Correct: {data["correct"]}')
+
+    # logging.info(f'-------------------------------------------')
+    # logging.info(f'After Sorting:')
+
+    # Sort class_dict by correct count in descending order before printing
+    sorted_cls_slices = {}
+    for cls_key, slice_data in class_dict.items():
+        if cls_key not in sorted_cls_slices:
+            sorted_cls_slices[cls_key] = []
+        
+        # Convert the slice_data dict to a list of dictionaries to allow sorting
+        slice_list = [{"key": key, "slice":value["slice"], "correct": value["correct"]} for key, value in slice_data.items()]
+        
+        # Sort the list of slice data dictionaries by the "correct" field in descending order
+        sorted_slices = sorted(slice_list, key=lambda x: x["correct"], reverse=True)
+        
+        # Store the top 5 slices for each class in sorted_cls_slices
+        sorted_cls_slices[cls_key] = sorted_slices[:5]
+
+    # Logging the sorted class dictionary
+    logging.info(f'Sorted Class Dict: {sorted_cls_slices}')
+    pdb.set_trace()
+
+        # logging.info(f'Class: {key}')
+        # for data in sorted_slices:
+        #     logging.info(f'Slice norm key: {data["key"]}, Slice: {data["slice"]}, Timepoint: {data["timepoint"]}, Correct: {data["correct"]}')
+
     # logging.info(keys_patient)
     # for key, value in keys_patient.items():
     #     # Count unique patients (elements) per key
@@ -603,10 +670,51 @@ def evaluate(data_loader, model, device, task, epoch, mode, num_class):
                 
     
     if mode=='test':
-        pass
-        # import matplotlib.pyplot as plt
+        import matplotlib.pyplot as plt
+        # Prepare data for plotting
+        max_correct_values = []
+        slice_keys = []
+        class_labels = []
+        norm_slice_keys = []
 
-        # # Sample data from max_count_
+        for cls_key, slices in sorted_cls_slices.items():
+            for slice_info in slices:
+                max_correct_values.append(slice_info['correct'])
+                slice_keys.append(slice_info['slice'])
+                class_labels.append(cls_key)  # Add the class label for each slice
+                norm_slice_keys.append(slice_info['key'])  # Add normalized slice key
+
+        # Create the figure and plot the bar chart
+        plt.figure(figsize=(20, 10))
+
+        # Create a colormap to assign different colors to each class
+        colors = plt.cm.get_cmap('tab20', len(max_correct_values))
+
+        # Plot the bars with different colors
+        bars = plt.bar(range(len(max_correct_values)), max_correct_values, color=[colors(i) for i in range(len(max_correct_values))])
+
+        # Add slice key, normalized slice key, and class information inside each bar
+        for bar, slice_key, norm_key, correct in zip(bars, slice_keys, norm_slice_keys, max_correct_values):
+            plt.text(bar.get_x() + bar.get_width() / 2, bar.get_height() / 2,
+                    f'Slice: {slice_key}\nNorm Key: {norm_key}\nCorrect: {correct}', ha='center', va='center', color='black', fontsize=10, rotation=90)
+
+        # Set Y-limit to give some padding on top
+        plt.yscale('log')
+        plt.ylim(1, max(max_correct_values) * 1.5)
+
+        # Set x-ticks to the class labels for better visualization
+        plt.xticks(range(len(max_correct_values)), class_labels, rotation=90)
+
+        # Add labels and title
+        plt.xlabel('Class')
+        plt.ylabel('Correct Predictions')
+        plt.title('Top 5 Correct Predictions per Class with Corresponding Slices (CFH)')
+
+        # Display the plot
+        plt.tight_layout()
+        plt.savefig(task+'top5_test_max_correct_predictions_per_class.jpg', dpi=150, bbox_inches='tight')
+
+        # Sample data from max_count_
         # classes = list(max_count_.keys())
         # max_correct_values = []
         # slice_keys = []

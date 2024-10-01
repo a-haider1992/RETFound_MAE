@@ -3,7 +3,7 @@ import torch
 import torchvision
 from torchvision import datasets
 from torch.utils.data import Dataset
-from pytorch_grad_cam import GradCAM, HiResCAM, ScoreCAM, GradCAMPlusPlus, AblationCAM, XGradCAM, EigenCAM, FullGrad
+from pytorch_grad_cam import GradCAM, HiResCAM, ScoreCAM, GradCAMPlusPlus, AblationCAM, XGradCAM, EigenCAM, FullGrad, LayerCAM
 from pytorch_grad_cam.utils.model_targets import ClassifierOutputSoftmaxTarget, ClassifierOutputTarget
 from pytorch_grad_cam.utils.image import show_cam_on_image, preprocess_image
 import pdb
@@ -35,9 +35,12 @@ def compute_and_save_heatmaps(model, save_dir, transform=None):
     # Create the save directory if it doesn't exist
     os.makedirs(save_dir, exist_ok=True)
 
+    # pdb.set_trace()
+
     # Set the model to evaluation mode
     model.eval()
-    target_layers = [model.module.blocks[-1].norm1]  # Adjust this line based on your model architecture
+    # target_layers = [model.module.blocks[-1].norm1]  # for parallel model
+    target_layers = [model.blocks[-1].norm1]  # for single model
 
     test_dataset = ImagePathDataset(root_dir='Retfound_correct_predictions', transform=transform)
     test_loader = torch.utils.data.DataLoader(test_dataset, batch_size=16, shuffle=False)
@@ -45,14 +48,23 @@ def compute_and_save_heatmaps(model, save_dir, transform=None):
     # Initialize GradCAM
     cam = GradCAM(model=model, target_layers=target_layers, reshape_transform=reshape_transform)
     scorecam = ScoreCAM(model=model, target_layers=target_layers, reshape_transform=reshape_transform)
+    abCAM = AblationCAM(model=model, target_layers=target_layers, reshape_transform=reshape_transform)
+    layCam = LayerCAM(model=model, target_layers=target_layers, reshape_transform=reshape_transform)
     targets = None
     cam.batch_size = 32
 
+    count = 0
+
     # Iterate over the test images and their corresponding labels
     for batch_idx, (image_paths, targets) in enumerate(test_loader):
+        if count > 2000:
+            break
+        count += len(image_paths)
         for idx, img_path in enumerate(image_paths):
             # Load the image using cv2
+            # pdb.set_trace()
             rgb_img = cv2.imread(img_path)[:, :, ::-1]  # Convert BGR (OpenCV) to RGB
+            # rgb_img = cv2.imread(img_path, cv2.IMREAD_GRAYSCALE)
             rgb_img = cv2.resize(rgb_img, (224, 224))
             rgb_img = np.float32(rgb_img) / 255.0  # Normalize to [0,1]
 
@@ -64,12 +76,13 @@ def compute_and_save_heatmaps(model, save_dir, transform=None):
             target = ClassifierOutputTarget(targets[idx].item())
 
             # Compute the Grad-CAM heatmap
-            grayscale_cam = cam(input_tensor=input_tensor,
+            grayscale_cam = layCam(input_tensor=input_tensor,
                                 targets=[target],
                                 eigen_smooth=True,
                                 aug_smooth=True)
 
             # Get the first grayscale CAM in the batch (only one image in this loop)
+            # pdb.set_trace()
             grayscale_cam = grayscale_cam[0]
 
             # Overlay the Grad-CAM heatmap on the original image
@@ -86,4 +99,5 @@ def compute_and_save_heatmaps(model, save_dir, transform=None):
             # Save the resulting heatmap
             save_path = os.path.join(subfolder_dir, f'heatmap_{batch_idx}_{idx}_{image_name}')
             cv2.imwrite(save_path, cv2.cvtColor(cam_image, cv2.COLOR_RGB2BGR))
+
             # print(f'Heatmap saved at {save_path}')

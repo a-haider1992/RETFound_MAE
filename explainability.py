@@ -50,16 +50,13 @@ def compute_and_save_heatmaps(model, save_dir, transform=None):
     scorecam = ScoreCAM(model=model, target_layers=target_layers, reshape_transform=reshape_transform)
     abCAM = AblationCAM(model=model, target_layers=target_layers, reshape_transform=reshape_transform)
     layCam = LayerCAM(model=model, target_layers=target_layers, reshape_transform=reshape_transform)
+    xgradcam = XGradCAM(model=model, target_layers=target_layers, reshape_transform=reshape_transform)
+    eigcam = EigenCAM(model=model, target_layers=target_layers, reshape_transform=reshape_transform)
     targets = None
     cam.batch_size = 32
 
-    count = 0
-
     # Iterate over the test images and their corresponding labels
     for batch_idx, (image_paths, targets) in enumerate(test_loader):
-        if count > 2000:
-            break
-        count += len(image_paths)
         for idx, img_path in enumerate(image_paths):
             # Load the image using cv2
             # pdb.set_trace()
@@ -76,7 +73,7 @@ def compute_and_save_heatmaps(model, save_dir, transform=None):
             target = ClassifierOutputTarget(targets[idx].item())
 
             # Compute the Grad-CAM heatmap
-            grayscale_cam = layCam(input_tensor=input_tensor,
+            grayscale_cam = cam(input_tensor=input_tensor,
                                 targets=[target],
                                 eigen_smooth=True,
                                 aug_smooth=True)

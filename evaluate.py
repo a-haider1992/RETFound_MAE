@@ -21,12 +21,15 @@ def save_correct_predictions(model, save_folder, data, transform=None):
     os.makedirs(save_folder, exist_ok=True)
 
     dataset = datasets.ImageFolder(root=data, transform=transform)
-    dataloader = DataLoader(dataset, batch_size=16, shuffle=False)
+    dataloader = DataLoader(dataset, batch_size=16, shuffle=True)
 
     # Set model to evaluation mode
     model.eval()
 
-    count = 0
+    count_0 = 0
+    count_1 = 0
+    count_2 = 0
+    num_images = 10
 
     # Disable gradient calculation for faster inference
     with torch.no_grad():
@@ -34,20 +37,37 @@ def save_correct_predictions(model, save_folder, data, transform=None):
             # Forward pass
             images = images.to('cuda')
             outputs = model(images)
-            # pdb.set_trace()
+
             prediction_softmax = nn.Softmax(dim=1)(outputs)
             _, predicted = torch.max(prediction_softmax, 1)
 
-            if count > 2000:
-                break
-            count += len(images)
-
             # Iterate over batch items and check predictions
             for i in range(len(images)):
+                # Global check to stop if all counts have reached num_images
+                if count_0 == num_images and count_1 == num_images and count_2 == num_images:
+                    break
+
                 # Check if prediction is correct
                 if predicted[i] == labels[i]:
                     # Get the correct class label (as a string)
                     class_label = dataset.classes[labels[i].item()]
+                    class_label = str(class_label)
+
+                    # Skip saving if the count for this class has reached num_images
+                    if class_label == '0' and count_0 >= num_images:
+                        continue
+                    if class_label == '1' and count_1 >= num_images:
+                        continue
+                    if class_label == '2' and count_2 >= num_images:
+                        continue
+
+                    # Increment the respective class count
+                    if class_label == '0':
+                        count_0 += 1
+                    elif class_label == '1':
+                        count_1 += 1
+                    elif class_label == '2':
+                        count_2 += 1
 
                     # Create a folder for the class if it doesn't exist
                     class_folder = os.path.join(save_folder, class_label)
@@ -62,4 +82,8 @@ def save_correct_predictions(model, save_folder, data, transform=None):
 
                     # Copy the image to the corresponding class folder
                     shutil.copy(image_path, save_path)
-                    # print(f'Saved: {image_name} to {class_folder}')
+
+            # Check after processing the batch
+            if count_0 == num_images and count_1 == num_images and count_2 == num_images:
+                break
+

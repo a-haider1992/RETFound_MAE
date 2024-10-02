@@ -295,7 +295,7 @@ def main(args):
             sampler_test = torch.utils.data.DistributedSampler(
                 dataset_test, num_replicas=num_tasks, rank=global_rank, shuffle=True)  # shuffle=True to reduce monitor bias
         else:
-            sampler_test = torch.utils.data.SequentialSampler(dataset_test)
+            sampler_test = torch.utils.data.RandomSampler(dataset_test)
             
 
     if global_rank == 0 and args.log_dir is not None and not args.eval:
@@ -468,11 +468,12 @@ def main(args):
     total_time_str = str(datetime.timedelta(seconds=int(total_time)))
     print('Training time {}'.format(total_time_str))
     # pdb.set_trace()
-    state_dict_best = torch.load(args.resume, map_location='cpu')
+    state_dict_best = torch.load(args.resume, map_location='cuda:0')
     model_without_ddp.load_state_dict(state_dict_best['model'])
-    test_stats,auc_roc = evaluate(data_loader_test, model_without_ddp, device,args.task,epoch=0, mode='test',num_class=args.nb_classes)
-    # save_correct_predictions(model, save_folder='Retfound_correct_predictions', transform=transform)
-    # compute_and_save_heatmaps(model, save_dir=args.task+'test_heatmaps', transform=transform)
+    # test_stats,auc_roc = evaluate(data_loader_test, model_without_ddp, device,args.task,epoch=0, mode='test',num_class=args.nb_classes)
+    save_correct_predictions(model_without_ddp, save_folder='Retfound_correct_predictions', data=data_loader_test,transform=transform)
+    pdb.set_trace()
+    compute_and_save_heatmaps(model_without_ddp, save_dir=args.task+'test_heatmaps', transform=transform)
     
 
 if __name__ == '__main__':
